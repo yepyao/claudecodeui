@@ -6,7 +6,7 @@ const spawnFunction = process.platform === 'win32' ? crossSpawn : spawn;
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
-import { getSessions, getSessionMessages } from './projects.js';
+import { getClaudeSessions, getSessionMessages } from './projects.js';
 import sessionManager from './sessionManager.js';
 import GeminiResponseHandler from './gemini-response-handler.js';
 
