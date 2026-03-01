@@ -1,8 +1,10 @@
+import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useCallback, useRef } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 
 import MessageComponent from './MessageComponent';
+import SystemContextBanner from './SystemContextBanner';
 import ProviderSelectionEmptyState from './ProviderSelectionEmptyState';
 import type { ChatMessage } from '../../types/types';
 import type { Project, ProjectSession, SessionProvider } from '../../../../types/app';
@@ -243,22 +245,34 @@ export default function ChatMessagesPane({
 
           {visibleMessages.map((message, index) => {
             const prevMessage = index > 0 ? visibleMessages[index - 1] : null;
+            const hasBanner = message.type === 'user' && (message.systemContext || message.attachedFiles || message.systemReminder);
+            const isEmptyAfterParse = message.type === 'user' && !message.content?.trim();
             return (
-              <MessageComponent
-                key={getMessageKey(message)}
-                message={message}
-                index={index}
-                prevMessage={prevMessage}
-                createDiff={createDiff}
-                onFileOpen={onFileOpen}
-                onShowSettings={onShowSettings}
-                onGrantToolPermission={onGrantToolPermission}
-                autoExpandTools={autoExpandTools}
-                showRawParameters={showRawParameters}
-                showThinking={showThinking}
-                selectedProject={selectedProject}
-                provider={provider}
-              />
+              <React.Fragment key={getMessageKey(message)}>
+                {hasBanner && (
+                  <SystemContextBanner
+                    systemContext={message.systemContext}
+                    attachedFiles={message.attachedFiles}
+                    systemReminder={message.systemReminder}
+                  />
+                )}
+                {!isEmptyAfterParse && (
+                  <MessageComponent
+                    message={message}
+                    index={index}
+                    prevMessage={prevMessage}
+                    createDiff={createDiff}
+                    onFileOpen={onFileOpen}
+                    onShowSettings={onShowSettings}
+                    onGrantToolPermission={onGrantToolPermission}
+                    autoExpandTools={autoExpandTools}
+                    showRawParameters={showRawParameters}
+                    showThinking={showThinking}
+                    selectedProject={selectedProject}
+                    provider={provider}
+                  />
+                )}
+              </React.Fragment>
             );
           })}
         </>

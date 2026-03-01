@@ -238,5 +238,16 @@
   },
   "tasks": {
     "nextTaskPrompt": "Start the next task"
+  },
+  "systemContext": {
+    "title": "Session Context",
+    "userInfo": "User Info",
+    "gitStatus": "Git Status",
+    "rules": "Rules",
+    "rulesCount": "{{count}} workspace rules",
+    "projectLayout": "Project Layout",
+    "agentTranscripts": "Agent Transcripts",
+    "attachedFiles": "Attached File Changes",
+    "systemReminder": "System"
   }
 }
