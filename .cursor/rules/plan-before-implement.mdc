@@ -1,0 +1,60 @@
+---
+alwaysApply: true
+---
+# Plan Before Implement
+
+When the user requests a code change or new feature, **always create a plan first** and wait for approval before implementing.
+
+## When Approval is Required
+
+- **Code changes** (new features, refactoring, bug fixes) - REQUIRES approval
+- **Investigation/analysis** (reading code, understanding behavior) - NO approval needed, proceed directly
+
+## Process
+
+1. **Create a plan file** in the `plan/` folder with a descriptive name (e.g., `plan/feature-name-plan.md`)
+2. **Include in the plan**:
+   - Objective
+   - Current state analysis
+   - Proposed changes (files, functions, approach)
+   - Tasks checklist
+   - Risk assessment (if applicable)
+3. **For code changes**: Present the plan and explicitly ask for approval, then wait
+4. **For investigation**: Present the plan and proceed immediately
+5. **Implement** only after user confirms (for code changes)
+
+## Plan File Template
+
+```markdown
+# Plan: [Feature/Change Name]
+
+## Objective
+[What we're trying to achieve]
+
+## Current State
+[How it works now]
+
+## Proposed Changes
+[What files/functions will be modified and how]
+
+## Tasks
+- [ ] Task 1
+- [ ] Task 2
+
+## Questions (if any)
+[Anything that needs clarification]
+```
+
+## Exceptions
+
+- **Trivial changes** (typo fixes, single-line changes) - ask if plan is needed
+- **Urgent bug fixes** - mention you'll skip the plan due to urgency
+- **User explicitly says "just do it"** - proceed without plan
+
+## Example
+
+User: "Add dark mode support"
+
+❌ Bad: Start implementing immediately
+
+✅ Good: "I'll create a plan for the dark mode feature. Let me analyze the codebase and put together a proposal in `plan/dark-mode-plan.md` for your review."
