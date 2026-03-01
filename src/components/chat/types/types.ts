@@ -25,6 +25,14 @@ export interface SubagentChildTool {
   timestamp: Date;
 }
 
+export interface SystemContextInfo {
+  userInfo?: { raw: string; os?: string; shell?: string; workspace?: string; date?: string };
+  gitStatus?: { raw: string; summary?: string };
+  rules?: { name: string; description?: string; content: string }[];
+  projectLayout?: string;
+  agentTranscripts?: string;
+}
+
 export interface ChatMessage {
   type: string;
   content?: string;
@@ -46,6 +54,9 @@ export interface ChatMessage {
     currentToolIndex: number;
     isComplete: boolean;
   };
+  systemContext?: SystemContextInfo;
+  attachedFiles?: string;
+  systemReminder?: string;
   [key: string]: unknown;
 }
 

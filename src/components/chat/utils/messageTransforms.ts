@@ -1,5 +1,6 @@
 import type { ChatMessage } from '../types/types';
 import { decodeHtmlEntities, unescapeWithMathProtection } from './chatFormatting';
+import { parseUserMessage } from './xmlTagParser';
 
 export interface DiffLine {
   type: 'added' | 'removed';
@@ -333,6 +334,15 @@ export const convertCursorSessionMessages = (blobs: CursorBlob[], projectPath: s
       if (reasoningText) {
         message.reasoning = reasoningText;
       }
+
+      if (role === 'user') {
+        const parsed = parseUserMessage(text);
+        message.content = parsed.text;
+        if (parsed.systemContext) message.systemContext = parsed.systemContext;
+        if (parsed.attachedFiles) message.attachedFiles = parsed.attachedFiles;
+        if (parsed.systemReminder) message.systemReminder = parsed.systemReminder;
+      }
+
       converted.push(message);
     }
   }
@@ -417,11 +427,16 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
             taskStatus: status,
           });
         } else {
-          converted.push({
+          const parsed = parseUserMessage(content);
+          const userMsg: ChatMessage = {
             type: 'user',
-            content: unescapeWithMathProtection(content),
+            content: unescapeWithMathProtection(parsed.text),
             timestamp: message.timestamp || new Date().toISOString(),
-          });
+          };
+          if (parsed.systemContext) userMsg.systemContext = parsed.systemContext;
+          if (parsed.attachedFiles) userMsg.attachedFiles = parsed.attachedFiles;
+          if (parsed.systemReminder) userMsg.systemReminder = parsed.systemReminder;
+          converted.push(userMsg);
         }
       }
       return;
