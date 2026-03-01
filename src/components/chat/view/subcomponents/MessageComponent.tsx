@@ -88,6 +88,7 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
   }, [autoExpandTools, isExpanded, message.isToolUse]);
 
   const formattedTime = useMemo(() => new Date(message.timestamp).toLocaleTimeString(), [message.timestamp]);
+  const shouldHideTimestamp = provider === 'cursor';
   const shouldHideThinkingMessage = Boolean(message.isThinking && !showThinking);
 
   if (shouldHideThinkingMessage) {
@@ -157,7 +158,7 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
                   </svg>
                 )}
               </button>
-              <span>{formattedTime}</span>
+              {!shouldHideTimestamp && <span>{formattedTime}</span>}
             </div>
           </div>
           {!isGrouped && (
@@ -476,7 +477,7 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
               </div>
             )}
 
-            {!isGrouped && (
+            {!isGrouped && !shouldHideTimestamp && (
               <div className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
                 {formattedTime}
               </div>
