@@ -792,4 +792,44 @@ router.get('/sessions/:sessionId', async (req, res) => {
   }
 });
 
+// DELETE /api/cursor/sessions/:sessionId - Delete a Cursor session
+router.delete('/sessions/:sessionId', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { projectPath } = req.query;
+    
+    if (!projectPath) {
+      return res.status(400).json({ error: 'projectPath query parameter is required' });
+    }
+    
+    // Calculate cwdID hash for the project path
+    const cwdId = crypto.createHash('md5').update(projectPath).digest('hex');
+    const sessionDir = path.join(os.homedir(), '.cursor', 'chats', cwdId, sessionId);
+    
+    // Check if session exists
+    try {
+      await fs.access(sessionDir);
+    } catch {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    
+    // Delete the session directory recursively
+    await fs.rm(sessionDir, { recursive: true, force: true });
+    
+    console.log(`Deleted Cursor session: ${sessionId} for project: ${projectPath}`);
+    
+    res.json({ 
+      success: true, 
+      message: `Session ${sessionId} deleted successfully` 
+    });
+    
+  } catch (error) {
+    console.error('Error deleting Cursor session:', error);
+    res.status(500).json({ 
+      error: 'Failed to delete Cursor session', 
+      details: error.message 
+    });
+  }
+});
+
 export default router;
