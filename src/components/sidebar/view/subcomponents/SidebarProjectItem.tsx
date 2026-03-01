@@ -34,6 +34,8 @@ type SidebarProjectItemProps = {
   onSaveProjectName: (projectName: string) => void;
   onDeleteProject: (project: Project) => void;
   onSessionSelect: (session: SessionWithProvider, projectName: string) => void;
+  isSessionStarred: (projectName: string, sessionId: string) => boolean;
+  onToggleStarSession: (projectName: string, sessionId: string) => void;
   onDeleteSession: (
     projectName: string,
     sessionId: string,
@@ -84,6 +86,8 @@ export default function SidebarProjectItem({
   onCancelEditingProject,
   onSaveProjectName,
   onDeleteProject,
+  isSessionStarred,
+  onToggleStarSession,
   onSessionSelect,
   onDeleteSession,
   onLoadMoreSessions,
@@ -420,6 +424,8 @@ export default function SidebarProjectItem({
         onCancelEditingSession={onCancelEditingSession}
         onSaveEditingSession={onSaveEditingSession}
         onProjectSelect={onProjectSelect}
+        isSessionStarred={isSessionStarred}
+        onToggleStarSession={onToggleStarSession}
         onSessionSelect={onSessionSelect}
         onDeleteSession={onDeleteSession}
         onLoadMoreSessions={onLoadMoreSessions}

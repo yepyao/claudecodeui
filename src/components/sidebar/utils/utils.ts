@@ -22,23 +22,6 @@ export const readProjectSortOrder = (): ProjectSortOrder => {
   }
 };
 
-export const loadStarredProjects = (): Set<string> => {
-  try {
-    const saved = localStorage.getItem('starredProjects');
-    return saved ? new Set<string>(JSON.parse(saved)) : new Set<string>();
-  } catch {
-    return new Set<string>();
-  }
-};
-
-export const persistStarredProjects = (starredProjects: Set<string>) => {
-  try {
-    localStorage.setItem('starredProjects', JSON.stringify([...starredProjects]));
-  } catch {
-    // Keep UI responsive even if storage fails.
-  }
-};
-
 export const getSessionDate = (session: SessionWithProvider): Date => {
   if (session.__provider === 'cursor') {
     return new Date(session.lastActivity || session.createdAt || 0);
@@ -102,6 +85,7 @@ export const getAllSessions = (
   project: Project,
   additionalSessions: AdditionalSessionsByProject,
   additionalCursorSessions: AdditionalSessionsByProject = {},
+  starredSessions: Map<string, Set<string>> = new Map(),
 ): SessionWithProvider[] => {
   const claudeSessions = [
     ...(project.sessions || []),
@@ -126,9 +110,18 @@ export const getAllSessions = (
     __provider: 'gemini' as const,
   }));
 
-  return [...claudeSessions, ...cursorSessions, ...codexSessions, ...geminiSessions].sort(
-    (a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime(),
-  );
+  const projectStarred = starredSessions.get(project.name);
+  const allSessions = [...claudeSessions, ...cursorSessions, ...codexSessions, ...geminiSessions];
+
+  return allSessions.sort((a, b) => {
+    const aStarred = projectStarred?.has(a.id) ?? false;
+    const bStarred = projectStarred?.has(b.id) ?? false;
+
+    if (aStarred && !bStarred) return -1;
+    if (!aStarred && bStarred) return 1;
+
+    return getSessionDate(b).getTime() - getSessionDate(a).getTime();
+  });
 };
 
 export const getProjectLastActivity = (

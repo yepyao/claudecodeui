@@ -35,6 +35,8 @@ export interface Project {
   displayName: string;
   fullPath: string;
   path?: string;
+  starred?: boolean;
+  starredSessions?: string[];
   sessions?: ProjectSession[];
   cursorSessions?: ProjectSession[];
   codexSessions?: ProjectSession[];

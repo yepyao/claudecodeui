@@ -70,6 +70,8 @@ function Sidebar({
     handleSessionClick,
     toggleStarProject,
     isProjectStarred,
+    toggleStarSession,
+    isSessionStarred,
     getProjectSessions,
     startEditing,
     cancelEditing,
@@ -158,6 +160,8 @@ function Sidebar({
     },
     onDeleteProject: requestProjectDelete,
     onSessionSelect: handleSessionClick,
+    isSessionStarred,
+    onToggleStarSession: toggleStarSession,
     onDeleteSession: showDeleteSessionConfirmation,
     onLoadMoreSessions: (project) => {
       void loadMoreSessions(project);

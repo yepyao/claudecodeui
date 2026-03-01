@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import type { TFunction } from 'i18next';
 import { api } from '../../../utils/api';
@@ -14,8 +14,6 @@ import type {
 import {
   filterProjects,
   getAllSessions,
-  loadStarredProjects,
-  persistStarredProjects,
   readProjectSortOrder,
   sortProjects,
 } from '../utils/utils';
@@ -73,7 +71,9 @@ export function useSidebarController({
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteProjectConfirmation | null>(null);
   const [sessionDeleteConfirmation, setSessionDeleteConfirmation] = useState<SessionDeleteConfirmation | null>(null);
   const [showVersionModal, setShowVersionModal] = useState(false);
-  const [starredProjects, setStarredProjects] = useState<Set<string>>(() => loadStarredProjects());
+  const [starredProjects, setStarredProjects] = useState<Set<string>>(new Set());
+  const [starredSessions, setStarredSessions] = useState<Map<string, Set<string>>>(new Map());
+  const starredInitialized = useRef(false);
 
   const isSidebarCollapsed = !isMobile && !sidebarVisible;
 
@@ -122,6 +122,48 @@ export function useSidebarController({
       );
       return Object.keys(filtered).length === Object.keys(prev).length ? prev : filtered;
     });
+  }, [projects]);
+
+  // Initialize starred state from server data once on first load
+  // After that, local state is the source of truth (synced to server via API calls)
+  useEffect(() => {
+    if (starredInitialized.current || projects.length === 0) {
+      return;
+    }
+
+    starredInitialized.current = true;
+
+    const newStarredProjects = new Set<string>();
+    const newStarredSessions = new Map<string, Set<string>>();
+
+    for (const project of projects) {
+      if (project.starred) {
+        newStarredProjects.add(project.name);
+      }
+      if (project.starredSessions?.length) {
+        newStarredSessions.set(project.name, new Set(project.starredSessions));
+      }
+    }
+
+    // One-time migration from localStorage to server
+    try {
+      const saved = localStorage.getItem('starredProjects');
+      if (saved) {
+        const localStarred = JSON.parse(saved) as string[];
+        for (const projectName of localStarred) {
+          if (!newStarredProjects.has(projectName)) {
+            newStarredProjects.add(projectName);
+            void api.starProject(projectName);
+          }
+        }
+        localStorage.removeItem('starredProjects');
+      }
+    } catch {
+      // Ignore migration errors
+    }
+
+    setStarredProjects(newStarredProjects);
+    setStarredSessions(newStarredSessions);
   }, [projects]);
 
   useEffect(() => {
@@ -216,10 +258,9 @@ export function useSidebarController({
       } else {
         next.add(projectName);
       }
-
-      persistStarredProjects(next);
       return next;
     });
+    void api.starProject(projectName);
   }, []);
 
   const isProjectStarred = useCallback(
@@ -227,9 +268,29 @@ export function useSidebarController({
     [starredProjects],
   );
 
+  const toggleStarSession = useCallback((projectName: string, sessionId: string) => {
+    setStarredSessions((prev) => {
+      const next = new Map(prev);
+      const projectStarred = new Set(next.get(projectName) || []);
+      if (projectStarred.has(sessionId)) {
+        projectStarred.delete(sessionId);
+      } else {
+        projectStarred.add(sessionId);
+      }
+      next.set(projectName, projectStarred);
+      return next;
+    });
+    void api.starSession(projectName, sessionId);
+  }, []);
+
+  const isSessionStarred = useCallback(
+    (projectName: string, sessionId: string) => starredSessions.get(projectName)?.has(sessionId) ?? false,
+    [starredSessions],
+  );
+
   const getProjectSessions = useCallback(
-    (project: Project) => getAllSessions(project, additionalSessions, additionalCursorSessions),
-    [additionalSessions, additionalCursorSessions],
+    (project: Project) => getAllSessions(project, additionalSessions, additionalCursorSessions, starredSessions),
+    [additionalSessions, additionalCursorSessions, starredSessions],
   );
 
   const projectsWithSessionMeta = useMemo(
@@ -416,8 +477,9 @@ export function useSidebarController({
           const currentClaudeCount =
             (project.sessions?.length || 0) + (additionalSessions[project.name]?.length || 0);
           
+          const projectStarredIds = [...(starredSessions.get(project.name) || [])];
           loadPromises.push(
-            api.sessions(project.name, 5, currentClaudeCount, 'claude').then(async (response) => {
+            api.sessions(project.name, 5, currentClaudeCount, 'claude', projectStarredIds).then(async (response) => {
               if (!response.ok) return;
               const result = (await response.json()) as {
                 sessions?: ProjectSession[];
@@ -439,8 +501,9 @@ export function useSidebarController({
           const currentCursorCount =
             (project.cursorSessions?.length || 0) + (additionalCursorSessions[project.name]?.length || 0);
           
+          const cursorStarredIds = [...(starredSessions.get(project.name) || [])];
           loadPromises.push(
-            api.sessions(project.name, 5, currentCursorCount, 'cursor').then(async (response) => {
+            api.sessions(project.name, 5, currentCursorCount, 'cursor', cursorStarredIds).then(async (response) => {
               if (!response.ok) return;
               const result = (await response.json()) as {
                 sessions?: ProjectSession[];
@@ -464,7 +527,7 @@ export function useSidebarController({
         setLoadingSessions((prev) => ({ ...prev, [project.name]: false }));
       }
     },
-    [additionalSessions, additionalCursorSessions, loadingSessions, projectHasMoreOverrides, cursorHasMoreOverrides],
+    [additionalSessions, additionalCursorSessions, loadingSessions, projectHasMoreOverrides, cursorHasMoreOverrides, starredSessions],
   );
 
   const handleProjectSelect = useCallback(
@@ -527,6 +590,8 @@ export function useSidebarController({
     handleSessionClick,
     toggleStarProject,
     isProjectStarred,
+    toggleStarSession,
+    isSessionStarred,
     getProjectSessions,
     startEditing,
     cancelEditing,

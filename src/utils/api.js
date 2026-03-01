@@ -46,8 +46,13 @@ export const api = {
   // Protected endpoints
   // config endpoint removed - no longer needed (frontend uses window.location)
   projects: () => authenticatedFetch('/api/projects'),
-  sessions: (projectName, limit = 5, offset = 0, provider = 'claude') =>
-    authenticatedFetch(`/api/projects/${projectName}/sessions?limit=${limit}&offset=${offset}&provider=${provider}`),
+  sessions: (projectName, limit = 5, offset = 0, provider = 'claude', starredIds = []) => {
+    const params = new URLSearchParams({ limit, offset, provider });
+    if (starredIds.length > 0) {
+      params.append('starred', starredIds.join(','));
+    }
+    return authenticatedFetch(`/api/projects/${projectName}/sessions?${params.toString()}`);
+  },
   sessionMessages: (projectName, sessionId, limit = null, offset = 0, provider = 'claude') => {
     const params = new URLSearchParams();
     if (limit !== null) {
@@ -72,6 +77,14 @@ export const api = {
     authenticatedFetch(`/api/projects/${projectName}/rename`, {
       method: 'PUT',
       body: JSON.stringify({ displayName }),
+    }),
+  starProject: (projectName) =>
+    authenticatedFetch(`/api/projects/${projectName}/star`, {
+      method: 'PUT',
+    }),
+  starSession: (projectName, sessionId) =>
+    authenticatedFetch(`/api/projects/${projectName}/sessions/${sessionId}/star`, {
+      method: 'PUT',
     }),
   deleteSession: (projectName, sessionId) =>
     authenticatedFetch(`/api/projects/${projectName}/sessions/${sessionId}`, {
