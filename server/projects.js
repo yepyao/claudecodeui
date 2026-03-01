@@ -1448,9 +1448,9 @@ async function getCursorSessions(projectPath, limit = 5, offset = 0) {
       })
     );
 
-    // Filter nulls and sort by creation time (newest first)
+    // Filter nulls and sort by last activity (most recent first)
     const validSessions = sessionsWithMeta.filter(Boolean);
-    validSessions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    validSessions.sort((a, b) => b.mtime - a.mtime);
 
     const total = validSessions.length;
     const paginatedSessions = validSessions.slice(offset, offset + limit);
