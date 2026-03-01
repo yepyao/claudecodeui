@@ -46,8 +46,8 @@ export const api = {
   // Protected endpoints
   // config endpoint removed - no longer needed (frontend uses window.location)
   projects: () => authenticatedFetch('/api/projects'),
-  sessions: (projectName, limit = 5, offset = 0) =>
-    authenticatedFetch(`/api/projects/${projectName}/sessions?limit=${limit}&offset=${offset}`),
+  sessions: (projectName, limit = 5, offset = 0, provider = 'claude') =>
+    authenticatedFetch(`/api/projects/${projectName}/sessions?limit=${limit}&offset=${offset}&provider=${provider}`),
   sessionMessages: (projectName, sessionId, limit = null, offset = 0, provider = 'claude') => {
     const params = new URLSearchParams();
     if (limit !== null) {

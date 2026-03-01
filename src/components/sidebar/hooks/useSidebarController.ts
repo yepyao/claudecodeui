@@ -59,11 +59,13 @@ export function useSidebarController({
   const [editingName, setEditingName] = useState('');
   const [loadingSessions, setLoadingSessions] = useState<LoadingSessionsByProject>({});
   const [additionalSessions, setAdditionalSessions] = useState<AdditionalSessionsByProject>({});
+  const [additionalCursorSessions, setAdditionalCursorSessions] = useState<AdditionalSessionsByProject>({});
   const [initialSessionsLoaded, setInitialSessionsLoaded] = useState<Set<string>>(new Set());
   const [currentTime, setCurrentTime] = useState(new Date());
   const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>('name');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [projectHasMoreOverrides, setProjectHasMoreOverrides] = useState<Record<string, boolean>>({});
+  const [cursorHasMoreOverrides, setCursorHasMoreOverrides] = useState<Record<string, boolean>>({});
   const [editingSession, setEditingSession] = useState<string | null>(null);
   const [editingSessionName, setEditingSessionName] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
@@ -84,9 +86,42 @@ export function useSidebarController({
   }, []);
 
   useEffect(() => {
-    setAdditionalSessions({});
-    setInitialSessionsLoaded(new Set());
-    setProjectHasMoreOverrides({});
+    // Only reset additional sessions for projects that no longer exist
+    // This preserves loaded sessions when projects are updated via WebSocket
+    const projectNames = new Set(projects.map((p) => p.name));
+    
+    setAdditionalSessions((prev) => {
+      const filtered = Object.fromEntries(
+        Object.entries(prev).filter(([name]) => projectNames.has(name))
+      );
+      return Object.keys(filtered).length === Object.keys(prev).length ? prev : filtered;
+    });
+    
+    setAdditionalCursorSessions((prev) => {
+      const filtered = Object.fromEntries(
+        Object.entries(prev).filter(([name]) => projectNames.has(name))
+      );
+      return Object.keys(filtered).length === Object.keys(prev).length ? prev : filtered;
+    });
+    
+    setInitialSessionsLoaded((prev) => {
+      const filtered = new Set([...prev].filter((name) => projectNames.has(name)));
+      return filtered.size === prev.size ? prev : filtered;
+    });
+    
+    setProjectHasMoreOverrides((prev) => {
+      const filtered = Object.fromEntries(
+        Object.entries(prev).filter(([name]) => projectNames.has(name))
+      );
+      return Object.keys(filtered).length === Object.keys(prev).length ? prev : filtered;
+    });
+    
+    setCursorHasMoreOverrides((prev) => {
+      const filtered = Object.fromEntries(
+        Object.entries(prev).filter(([name]) => projectNames.has(name))
+      );
+      return Object.keys(filtered).length === Object.keys(prev).length ? prev : filtered;
+    });
   }, [projects]);
 
   useEffect(() => {
@@ -193,29 +228,36 @@ export function useSidebarController({
   );
 
   const getProjectSessions = useCallback(
-    (project: Project) => getAllSessions(project, additionalSessions),
-    [additionalSessions],
+    (project: Project) => getAllSessions(project, additionalSessions, additionalCursorSessions),
+    [additionalSessions, additionalCursorSessions],
   );
 
   const projectsWithSessionMeta = useMemo(
     () =>
       projects.map((project) => {
-        const hasMoreOverride = projectHasMoreOverrides[project.name];
-        if (hasMoreOverride === undefined) {
+        const claudeHasMoreOverride = projectHasMoreOverrides[project.name];
+        const cursorHasMoreOverride = cursorHasMoreOverrides[project.name];
+        
+        if (claudeHasMoreOverride === undefined && cursorHasMoreOverride === undefined) {
           return project;
         }
 
         return {
           ...project,
-          sessionMeta: { ...project.sessionMeta, hasMore: hasMoreOverride },
+          sessionMeta: claudeHasMoreOverride !== undefined 
+            ? { ...project.sessionMeta, hasMore: claudeHasMoreOverride }
+            : project.sessionMeta,
+          cursorSessionMeta: cursorHasMoreOverride !== undefined
+            ? { ...project.cursorSessionMeta, hasMore: cursorHasMoreOverride }
+            : project.cursorSessionMeta,
         };
       }),
-    [projectHasMoreOverrides, projects],
+    [projectHasMoreOverrides, cursorHasMoreOverrides, projects],
   );
 
   const sortedProjects = useMemo(
-    () => sortProjects(projectsWithSessionMeta, projectSortOrder, starredProjects, additionalSessions),
-    [additionalSessions, projectSortOrder, projectsWithSessionMeta, starredProjects],
+    () => sortProjects(projectsWithSessionMeta, projectSortOrder, starredProjects, additionalSessions, additionalCursorSessions),
+    [additionalSessions, additionalCursorSessions, projectSortOrder, projectsWithSessionMeta, starredProjects],
   );
 
   const filteredProjects = useMemo(
@@ -346,45 +388,83 @@ export function useSidebarController({
 
   const loadMoreSessions = useCallback(
     async (project: Project) => {
-      const hasMoreOverride = projectHasMoreOverrides[project.name];
-      const canLoadMore =
-        hasMoreOverride !== undefined ? hasMoreOverride : project.sessionMeta?.hasMore === true;
-      if (!canLoadMore || loadingSessions[project.name]) {
+      if (loadingSessions[project.name]) {
+        return;
+      }
+
+      // Check if Claude sessions have more to load
+      const claudeHasMoreOverride = projectHasMoreOverrides[project.name];
+      const claudeCanLoadMore =
+        claudeHasMoreOverride !== undefined ? claudeHasMoreOverride : project.sessionMeta?.hasMore === true;
+
+      // Check if Cursor sessions have more to load
+      const cursorHasMoreOverride = cursorHasMoreOverrides[project.name];
+      const cursorCanLoadMore =
+        cursorHasMoreOverride !== undefined ? cursorHasMoreOverride : project.cursorSessionMeta?.hasMore === true;
+
+      if (!claudeCanLoadMore && !cursorCanLoadMore) {
         return;
       }
 
       setLoadingSessions((prev) => ({ ...prev, [project.name]: true }));
 
       try {
-        const currentSessionCount =
-          (project.sessions?.length || 0) + (additionalSessions[project.name]?.length || 0);
-        const response = await api.sessions(project.name, 5, currentSessionCount);
+        const loadPromises: Promise<void>[] = [];
 
-        if (!response.ok) {
-          return;
+        // Load more Claude sessions
+        if (claudeCanLoadMore) {
+          const currentClaudeCount =
+            (project.sessions?.length || 0) + (additionalSessions[project.name]?.length || 0);
+          
+          loadPromises.push(
+            api.sessions(project.name, 5, currentClaudeCount, 'claude').then(async (response) => {
+              if (!response.ok) return;
+              const result = (await response.json()) as {
+                sessions?: ProjectSession[];
+                hasMore?: boolean;
+              };
+              setAdditionalSessions((prev) => ({
+                ...prev,
+                [project.name]: [...(prev[project.name] || []), ...(result.sessions || [])],
+              }));
+              if (result.hasMore === false) {
+                setProjectHasMoreOverrides((prev) => ({ ...prev, [project.name]: false }));
+              }
+            })
+          );
         }
 
-        const result = (await response.json()) as {
-          sessions?: ProjectSession[];
-          hasMore?: boolean;
-        };
-
-        setAdditionalSessions((prev) => ({
-          ...prev,
-          [project.name]: [...(prev[project.name] || []), ...(result.sessions || [])],
-        }));
-
-        if (result.hasMore === false) {
-          // Keep hasMore state in local hook state instead of mutating the project prop object.
-          setProjectHasMoreOverrides((prev) => ({ ...prev, [project.name]: false }));
+        // Load more Cursor sessions
+        if (cursorCanLoadMore) {
+          const currentCursorCount =
+            (project.cursorSessions?.length || 0) + (additionalCursorSessions[project.name]?.length || 0);
+          
+          loadPromises.push(
+            api.sessions(project.name, 5, currentCursorCount, 'cursor').then(async (response) => {
+              if (!response.ok) return;
+              const result = (await response.json()) as {
+                sessions?: ProjectSession[];
+                hasMore?: boolean;
+              };
+              setAdditionalCursorSessions((prev) => ({
+                ...prev,
+                [project.name]: [...(prev[project.name] || []), ...(result.sessions || [])],
+              }));
+              if (result.hasMore === false) {
+                setCursorHasMoreOverrides((prev) => ({ ...prev, [project.name]: false }));
+              }
+            })
+          );
         }
+
+        await Promise.all(loadPromises);
       } catch (error) {
         console.error('Error loading more sessions:', error);
       } finally {
         setLoadingSessions((prev) => ({ ...prev, [project.name]: false }));
       }
     },
-    [additionalSessions, loadingSessions, projectHasMoreOverrides],
+    [additionalSessions, additionalCursorSessions, loadingSessions, projectHasMoreOverrides, cursorHasMoreOverrides],
   );
 
   const handleProjectSelect = useCallback(

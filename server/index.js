@@ -44,7 +44,7 @@ import pty from 'node-pty';
 import fetch from 'node-fetch';
 import mime from 'mime-types';
 
-import { getProjects, getSessions, getSessionMessages, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
+import { getProjects, getClaudeSessions, getCursorSessions, getSessionMessages, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval } from './claude-sdk.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive, getActiveCodexSessions } from './openai-codex.js';
@@ -491,9 +491,21 @@ app.get('/api/projects', authenticateToken, async (req, res) => {
 
 app.get('/api/projects/:projectName/sessions', authenticateToken, async (req, res) => {
     try {
-        const { limit = 5, offset = 0 } = req.query;
-        const result = await getSessions(req.params.projectName, parseInt(limit), parseInt(offset));
-        res.json(result);
+        const { limit = 5, offset = 0, provider = 'claude' } = req.query;
+        
+        if (provider === 'cursor') {
+            // For Cursor sessions, we need the project path
+            const projectPath = await extractProjectDirectory(req.params.projectName).catch(() => null);
+            if (!projectPath) {
+                return res.json({ sessions: [], hasMore: false, total: 0 });
+            }
+            const result = await getCursorSessions(projectPath, parseInt(limit), parseInt(offset));
+            res.json(result);
+        } else {
+            // Default to Claude sessions
+            const result = await getClaudeSessions(req.params.projectName, parseInt(limit), parseInt(offset));
+            res.json(result);
+        }
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
