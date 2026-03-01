@@ -40,6 +40,7 @@ export interface Project {
   codexSessions?: ProjectSession[];
   geminiSessions?: ProjectSession[];
   sessionMeta?: ProjectSessionMeta;
+  cursorSessionMeta?: ProjectSessionMeta;
   taskmaster?: ProjectTaskmasterInfo;
   [key: string]: unknown;
 }

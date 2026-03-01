@@ -41,7 +41,7 @@ export const persistStarredProjects = (starredProjects: Set<string>) => {
 
 export const getSessionDate = (session: SessionWithProvider): Date => {
   if (session.__provider === 'cursor') {
-    return new Date(session.createdAt || 0);
+    return new Date(session.lastActivity || session.createdAt || 0);
   }
 
   if (session.__provider === 'codex') {
@@ -69,7 +69,7 @@ export const getSessionName = (session: SessionWithProvider, t: TFunction): stri
 
 export const getSessionTime = (session: SessionWithProvider): string => {
   if (session.__provider === 'cursor') {
-    return String(session.createdAt || '');
+    return String(session.lastActivity || session.createdAt || '');
   }
 
   if (session.__provider === 'codex') {
@@ -101,13 +101,17 @@ export const createSessionViewModel = (
 export const getAllSessions = (
   project: Project,
   additionalSessions: AdditionalSessionsByProject,
+  additionalCursorSessions: AdditionalSessionsByProject = {},
 ): SessionWithProvider[] => {
   const claudeSessions = [
     ...(project.sessions || []),
     ...(additionalSessions[project.name] || []),
   ].map((session) => ({ ...session, __provider: 'claude' as const }));
 
-  const cursorSessions = (project.cursorSessions || []).map((session) => ({
+  const cursorSessions = [
+    ...(project.cursorSessions || []),
+    ...(additionalCursorSessions[project.name] || []),
+  ].map((session) => ({
     ...session,
     __provider: 'cursor' as const,
   }));
@@ -130,8 +134,9 @@ export const getAllSessions = (
 export const getProjectLastActivity = (
   project: Project,
   additionalSessions: AdditionalSessionsByProject,
+  additionalCursorSessions: AdditionalSessionsByProject = {},
 ): Date => {
-  const sessions = getAllSessions(project, additionalSessions);
+  const sessions = getAllSessions(project, additionalSessions, additionalCursorSessions);
   if (sessions.length === 0) {
     return new Date(0);
   }
@@ -147,6 +152,7 @@ export const sortProjects = (
   projectSortOrder: ProjectSortOrder,
   starredProjects: Set<string>,
   additionalSessions: AdditionalSessionsByProject,
+  additionalCursorSessions: AdditionalSessionsByProject = {},
 ): Project[] => {
   const byName = [...projects];
 
@@ -164,8 +170,8 @@ export const sortProjects = (
 
     if (projectSortOrder === 'date') {
       return (
-        getProjectLastActivity(projectB, additionalSessions).getTime() -
-        getProjectLastActivity(projectA, additionalSessions).getTime()
+        getProjectLastActivity(projectB, additionalSessions, additionalCursorSessions).getTime() -
+        getProjectLastActivity(projectA, additionalSessions, additionalCursorSessions).getTime()
       );
     }
 
