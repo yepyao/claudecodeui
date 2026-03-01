@@ -100,7 +100,6 @@ temp/
 
 # AI specific
 .claude/
-.cursor/
 .roo/
 .taskmaster/
 .cline/
@@ -130,3 +129,6 @@ dev-debug.log
 # Task files
 tasks.json
 tasks/ 
+
+# Planning docs
+plan/
