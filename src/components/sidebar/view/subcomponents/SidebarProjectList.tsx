@@ -45,6 +45,8 @@ export type SidebarProjectListProps = {
     sessionTitle: string,
     provider: SessionProvider,
   ) => void;
+  isSessionStarred: (projectName: string, sessionId: string) => boolean;
+  onToggleStarSession: (projectName: string, sessionId: string) => void;
   onLoadMoreSessions: (project: Project) => void;
   onNewSession: (project: Project) => void;
   onEditingSessionNameChange: (value: string) => void;
@@ -84,6 +86,8 @@ export default function SidebarProjectList({
   onSaveProjectName,
   onDeleteProject,
   onSessionSelect,
+  isSessionStarred,
+  onToggleStarSession,
   onDeleteSession,
   onLoadMoreSessions,
   onNewSession,
@@ -147,6 +151,8 @@ export default function SidebarProjectList({
               onSaveProjectName={onSaveProjectName}
               onDeleteProject={onDeleteProject}
               onSessionSelect={onSessionSelect}
+              isSessionStarred={isSessionStarred}
+              onToggleStarSession={onToggleStarSession}
               onDeleteSession={onDeleteSession}
               onLoadMoreSessions={onLoadMoreSessions}
               onNewSession={onNewSession}

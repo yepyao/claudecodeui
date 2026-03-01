@@ -467,7 +467,8 @@ async function getClaudeProjects(progressCallback = null) {
 // Build a single Claude project with Claude sessions only
 async function buildClaudeProject(projectName, config) {
   const actualProjectDir = await extractProjectDirectory(projectName);
-  const customName = config[projectName]?.displayName;
+  const projectConfig = config[projectName] || {};
+  const customName = projectConfig.displayName;
 
   const project = {
     name: projectName,
@@ -475,6 +476,8 @@ async function buildClaudeProject(projectName, config) {
     displayName: customName || await generateDisplayName(projectName, actualProjectDir),
     fullPath: actualProjectDir,
     isCustomName: !!customName,
+    starred: !!projectConfig.starred,
+    starredSessions: projectConfig.starredSessions || [],
     sessions: [],
     cursorSessions: [],
     codexSessions: [],
@@ -484,7 +487,7 @@ async function buildClaudeProject(projectName, config) {
 
   // Fetch Claude sessions only
   try {
-    const sessionResult = await getClaudeSessions(projectName, 5, 0);
+    const sessionResult = await getClaudeSessions(projectName, 5, 0, project.starredSessions);
     project.sessions = sessionResult.sessions || [];
     project.sessionMeta = { hasMore: sessionResult.hasMore, total: sessionResult.total };
   } catch (e) {
@@ -542,6 +545,8 @@ async function buildManualProject(projectName, projectConfig) {
     fullPath: actualProjectDir,
     isCustomName: !!projectConfig.displayName,
     isManuallyAdded: true,
+    starred: !!projectConfig.starred,
+    starredSessions: projectConfig.starredSessions || [],
     sessions: [],
     cursorSessions: [],
     codexSessions: [],
@@ -584,12 +589,13 @@ async function getCursorProjects(progressCallback = null) {
         continue;
       }
 
-      const cursorResult = await getCursorSessions(projectPath);
-      
       // Check config for custom display name
       // Try Cursor format (localhome-...) and Claude format (-localhome-...)
       const claudeEncodedName = '-' + entry.name;
-      const customName = config[entry.name]?.displayName || config[claudeEncodedName]?.displayName;
+      const projectConfig = config[entry.name] || config[claudeEncodedName] || {};
+
+      const cursorResult = await getCursorSessions(projectPath, 5, 0, projectConfig.starredSessions || []);
+      const customName = projectConfig.displayName;
 
       projects.push({
         name: entry.name,
@@ -597,6 +603,8 @@ async function getCursorProjects(progressCallback = null) {
         displayName: customName || await generateDisplayName(entry.name, projectPath),
         fullPath: projectPath,
         isCustomName: !!customName,
+        starred: !!projectConfig.starred,
+        starredSessions: projectConfig.starredSessions || [],
         sessions: [],
         cursorSessions: cursorResult.sessions,
         codexSessions: [],
@@ -634,6 +642,13 @@ function mergeProjects(claudeProjects, cursorProjects, manualProjects = []) {
       // Project exists - add Cursor sessions and metadata to it
       existing.cursorSessions = cursorProject.cursorSessions;
       existing.cursorSessionMeta = cursorProject.cursorSessionMeta;
+      // Merge starred info (prefer existing Claude project's config)
+      if (!existing.starred && cursorProject.starred) {
+        existing.starred = true;
+      }
+      if (cursorProject.starredSessions?.length && !existing.starredSessions?.length) {
+        existing.starredSessions = cursorProject.starredSessions;
+      }
     } else {
       // Cursor-only project - add it with flag
       cursorProject.isCursorOnly = true;
@@ -699,7 +714,7 @@ async function detectTaskMaster(projectPath) {
   }
 }
 
-async function getClaudeSessions(projectName, limit = 5, offset = 0) {
+async function getClaudeSessions(projectName, limit = 5, offset = 0, starredSessionIds = []) {
   const projectDir = path.join(os.homedir(), '.claude', 'projects', projectName);
 
   try {
@@ -810,12 +825,16 @@ async function getClaudeSessions(projectName, limit = 5, offset = 0) {
       .filter(session => !session.summary.startsWith('{ "'))
       .sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity));
 
-    const total = visibleSessions.length;
-    const paginatedSessions = visibleSessions.slice(offset, offset + limit);
+    const starredSet = new Set(starredSessionIds);
+    const starredSessions = visibleSessions.filter(s => starredSet.has(s.id));
+    const nonStarredSessions = visibleSessions.filter(s => !starredSet.has(s.id));
+
+    const total = nonStarredSessions.length;
+    const paginatedSessions = nonStarredSessions.slice(offset, offset + limit);
     const hasMore = offset + limit < total;
 
     return {
-      sessions: paginatedSessions,
+      sessions: [...starredSessions, ...paginatedSessions],
       hasMore,
       total,
       offset,
@@ -1144,16 +1163,49 @@ async function renameProject(projectName, newDisplayName) {
 
   if (!newDisplayName || newDisplayName.trim() === '') {
     // Remove custom name if empty, will fall back to auto-generated
-    delete config[projectName];
+    if (config[projectName]) {
+      delete config[projectName].displayName;
+      if (Object.keys(config[projectName]).length === 0) {
+        delete config[projectName];
+      }
+    }
   } else {
-    // Set custom display name
     config[projectName] = {
+      ...config[projectName],
       displayName: newDisplayName.trim()
     };
   }
 
   await saveProjectConfig(config);
   return true;
+}
+
+// Toggle project starred status
+async function toggleStarProject(projectName) {
+  const config = await loadProjectConfig();
+  config[projectName] = {
+    ...config[projectName],
+    starred: !config[projectName]?.starred,
+  };
+  await saveProjectConfig(config);
+  return config[projectName].starred;
+}
+
+// Toggle session starred status
+async function toggleStarSession(projectName, sessionId) {
+  const config = await loadProjectConfig();
+  config[projectName] = config[projectName] || {};
+  const starredSessions = new Set(config[projectName].starredSessions || []);
+
+  if (starredSessions.has(sessionId)) {
+    starredSessions.delete(sessionId);
+  } else {
+    starredSessions.add(sessionId);
+  }
+
+  config[projectName].starredSessions = [...starredSessions];
+  await saveProjectConfig(config);
+  return starredSessions.has(sessionId);
 }
 
 // Delete a session from a project
@@ -1387,7 +1439,7 @@ async function extractCursorProjectPath(encodedName) {
 
 // Get Cursor sessions from ~/.cursor/chats/{cwdHash}/ store.db files
 // This reads directly from Cursor's chat storage which has proper session names
-async function getCursorSessions(projectPath, limit = 5, offset = 0) {
+async function getCursorSessions(projectPath, limit = 5, offset = 0, starredSessionIds = []) {
   if (!projectPath) {
     return { sessions: [], hasMore: false, total: 0 };
   }
@@ -1452,12 +1504,16 @@ async function getCursorSessions(projectPath, limit = 5, offset = 0) {
     const validSessions = sessionsWithMeta.filter(Boolean);
     validSessions.sort((a, b) => b.mtime - a.mtime);
 
-    const total = validSessions.length;
-    const paginatedSessions = validSessions.slice(offset, offset + limit);
+    const starredSet = new Set(starredSessionIds);
+    const starredValidSessions = validSessions.filter(s => starredSet.has(s.id));
+    const nonStarredValidSessions = validSessions.filter(s => !starredSet.has(s.id));
+
+    const total = nonStarredValidSessions.length;
+    const paginatedSessions = nonStarredValidSessions.slice(offset, offset + limit);
     const hasMore = offset + limit < total;
 
-    // Return paginated sessions
-    for (const session of paginatedSessions) {
+    // Return starred + paginated sessions
+    for (const session of [...starredValidSessions, ...paginatedSessions]) {
       // Use file mtime for sessions with messages, createdAt for empty sessions
       const lastActivity = session.messageCount > 1 
         ? session.mtime.toISOString() 
@@ -1949,6 +2005,8 @@ export {
   getCursorSessions,
   getSessionMessages,
   renameProject,
+  toggleStarProject,
+  toggleStarSession,
   deleteSession,
   deleteProject,
   addProjectManually,

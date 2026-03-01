@@ -44,7 +44,7 @@ import pty from 'node-pty';
 import fetch from 'node-fetch';
 import mime from 'mime-types';
 
-import { getProjects, getClaudeSessions, getCursorSessions, getSessionMessages, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
+import { getProjects, getClaudeSessions, getCursorSessions, getSessionMessages, renameProject, toggleStarProject, toggleStarSession, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval } from './claude-sdk.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive, getActiveCodexSessions } from './openai-codex.js';
@@ -491,7 +491,8 @@ app.get('/api/projects', authenticateToken, async (req, res) => {
 
 app.get('/api/projects/:projectName/sessions', authenticateToken, async (req, res) => {
     try {
-        const { limit = 5, offset = 0, provider = 'claude' } = req.query;
+        const { limit = 5, offset = 0, provider = 'claude', starred = '' } = req.query;
+        const starredIds = starred ? starred.split(',').filter(Boolean) : [];
         
         if (provider === 'cursor') {
             // For Cursor sessions, we need the project path
@@ -499,11 +500,11 @@ app.get('/api/projects/:projectName/sessions', authenticateToken, async (req, re
             if (!projectPath) {
                 return res.json({ sessions: [], hasMore: false, total: 0 });
             }
-            const result = await getCursorSessions(projectPath, parseInt(limit), parseInt(offset));
+            const result = await getCursorSessions(projectPath, parseInt(limit), parseInt(offset), starredIds);
             res.json(result);
         } else {
             // Default to Claude sessions
-            const result = await getClaudeSessions(req.params.projectName, parseInt(limit), parseInt(offset));
+            const result = await getClaudeSessions(req.params.projectName, parseInt(limit), parseInt(offset), starredIds);
             res.json(result);
         }
     } catch (error) {
@@ -542,6 +543,26 @@ app.put('/api/projects/:projectName/rename', authenticateToken, async (req, res)
         const { displayName } = req.body;
         await renameProject(req.params.projectName, displayName);
         res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Toggle project star
+app.put('/api/projects/:projectName/star', authenticateToken, async (req, res) => {
+    try {
+        const starred = await toggleStarProject(req.params.projectName);
+        res.json({ success: true, starred });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Toggle session star
+app.put('/api/projects/:projectName/sessions/:sessionId/star', authenticateToken, async (req, res) => {
+    try {
+        const starred = await toggleStarSession(req.params.projectName, req.params.sessionId);
+        res.json({ success: true, starred });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

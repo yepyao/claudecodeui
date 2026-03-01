@@ -19,6 +19,8 @@ type SidebarProjectSessionsProps = {
   onStartEditingSession: (sessionId: string, initialName: string) => void;
   onCancelEditingSession: () => void;
   onSaveEditingSession: (projectName: string, sessionId: string, summary: string) => void;
+  isSessionStarred: (projectName: string, sessionId: string) => boolean;
+  onToggleStarSession: (projectName: string, sessionId: string) => void;
   onProjectSelect: (project: Project) => void;
   onSessionSelect: (session: SessionWithProvider, projectName: string) => void;
   onDeleteSession: (
@@ -65,6 +67,8 @@ export default function SidebarProjectSessions({
   onStartEditingSession,
   onCancelEditingSession,
   onSaveEditingSession,
+  isSessionStarred,
+  onToggleStarSession,
   onProjectSelect,
   onSessionSelect,
   onDeleteSession,
@@ -94,6 +98,7 @@ export default function SidebarProjectSessions({
             key={session.id}
             project={project}
             session={session}
+            isStarred={isSessionStarred(project.name, session.id)}
             selectedSession={selectedSession}
             currentTime={currentTime}
             editingSession={editingSession}
@@ -102,6 +107,7 @@ export default function SidebarProjectSessions({
             onStartEditingSession={onStartEditingSession}
             onCancelEditingSession={onCancelEditingSession}
             onSaveEditingSession={onSaveEditingSession}
+            onToggleStarSession={onToggleStarSession}
             onProjectSelect={onProjectSelect}
             onSessionSelect={onSessionSelect}
             onDeleteSession={onDeleteSession}

@@ -1,6 +1,6 @@
 import { Badge } from '../../../ui/badge';
 import { Button } from '../../../ui/button';
-import { Check, Clock, Edit2, Trash2, X } from 'lucide-react';
+import { Check, Clock, Edit2, Star, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 import { cn } from '../../../../lib/utils';
 import { formatTimeAgo } from '../../../../utils/dateUtils';
@@ -12,6 +12,7 @@ import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo'
 type SidebarSessionItemProps = {
   project: Project;
   session: SessionWithProvider;
+  isStarred: boolean;
   selectedSession: ProjectSession | null;
   currentTime: Date;
   editingSession: string | null;
@@ -20,6 +21,7 @@ type SidebarSessionItemProps = {
   onStartEditingSession: (sessionId: string, initialName: string) => void;
   onCancelEditingSession: () => void;
   onSaveEditingSession: (projectName: string, sessionId: string, summary: string) => void;
+  onToggleStarSession: (projectName: string, sessionId: string) => void;
   onProjectSelect: (project: Project) => void;
   onSessionSelect: (session: SessionWithProvider, projectName: string) => void;
   onDeleteSession: (
@@ -35,6 +37,7 @@ type SidebarSessionItemProps = {
 export default function SidebarSessionItem({
   project,
   session,
+  isStarred,
   selectedSession,
   currentTime,
   editingSession,
@@ -43,6 +46,7 @@ export default function SidebarSessionItem({
   onStartEditingSession,
   onCancelEditingSession,
   onSaveEditingSession,
+  onToggleStarSession,
   onProjectSelect,
   onSessionSelect,
   onDeleteSession,
@@ -63,6 +67,10 @@ export default function SidebarSessionItem({
 
   const requestDeleteSession = () => {
     onDeleteSession(project.name, session.id, sessionView.sessionName, session.__provider);
+  };
+
+  const toggleStar = () => {
+    onToggleStarSession(project.name, session.id);
   };
 
   return (
@@ -112,6 +120,18 @@ export default function SidebarSessionItem({
               </div>
             </div>
 
+            <button
+              className={cn(
+                'w-5 h-5 rounded-md flex items-center justify-center active:scale-95 transition-transform ml-1',
+                isStarred ? 'bg-yellow-500/10' : 'opacity-70',
+              )}
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleStar();
+              }}
+            >
+              <Star className={cn('w-2.5 h-2.5', isStarred ? 'text-yellow-600 dark:text-yellow-400 fill-current' : 'text-muted-foreground')} />
+            </button>
             {!sessionView.isCursorSession && (
               <button
                 className="w-5 h-5 rounded-md bg-red-50 dark:bg-red-900/20 flex items-center justify-center active:scale-95 transition-transform opacity-70 ml-1"
@@ -139,85 +159,104 @@ export default function SidebarSessionItem({
           <div className="flex items-start gap-2 min-w-0 w-full">
             <SessionProviderLogo provider={session.__provider} className="w-3 h-3 mt-0.5 flex-shrink-0" />
             <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium truncate text-foreground">{sessionView.sessionName}</div>
+              <div className="text-xs font-medium truncate text-foreground">
+                {sessionView.sessionName}
+                {sessionView.messageCount > 0 && (
+                  <span className="text-muted-foreground font-normal ml-1">({sessionView.messageCount})</span>
+                )}
+              </div>
               <div className="flex items-center gap-1 mt-0.5">
                 <Clock className="w-2.5 h-2.5 text-muted-foreground" />
                 <span className="text-xs text-muted-foreground">
                   {formatTimeAgo(sessionView.sessionTime, currentTime, t)}
-                </span>
-                {sessionView.messageCount > 0 && (
-                  <Badge
-                    variant="secondary"
-                    className="text-xs px-1 py-0 ml-auto group-hover:opacity-0 transition-opacity"
-                  >
-                    {sessionView.messageCount}
-                  </Badge>
-                )}
-                <span className="ml-1 opacity-70 group-hover:opacity-0 transition-opacity">
-                  <SessionProviderLogo provider={session.__provider} className="w-3 h-3" />
                 </span>
               </div>
             </div>
           </div>
         </Button>
 
-        {!sessionView.isCursorSession && (
-          <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
-            {editingSession === session.id && !sessionView.isCodexSession ? (
-              <>
-                <input
-                  type="text"
-                  value={editingSessionName}
-                  onChange={(event) => onEditingSessionNameChange(event.target.value)}
-                  onKeyDown={(event) => {
-                    event.stopPropagation();
-                    if (event.key === 'Enter') {
-                      saveEditedSession();
-                    } else if (event.key === 'Escape') {
-                      onCancelEditingSession();
-                    }
-                  }}
-                  onClick={(event) => event.stopPropagation()}
-                  className="w-32 px-2 py-1 text-xs border border-border rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-                  autoFocus
-                />
-                <button
-                  className="w-6 h-6 bg-green-50 hover:bg-green-100 dark:bg-green-900/20 dark:hover:bg-green-900/40 rounded flex items-center justify-center"
-                  onClick={(event) => {
-                    event.stopPropagation();
+        <div className={cn(
+          'absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center gap-1 transition-all duration-200',
+          isStarred ? '' : 'opacity-0 group-hover:opacity-100',
+        )}>
+          {editingSession === session.id && !sessionView.isCodexSession && !sessionView.isCursorSession ? (
+            <>
+              <input
+                type="text"
+                value={editingSessionName}
+                onChange={(event) => onEditingSessionNameChange(event.target.value)}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                  if (event.key === 'Enter') {
                     saveEditedSession();
-                  }}
-                  title={t('tooltips.save')}
-                >
-                  <Check className="w-3 h-3 text-green-600 dark:text-green-400" />
-                </button>
+                  } else if (event.key === 'Escape') {
+                    onCancelEditingSession();
+                  }
+                }}
+                onClick={(event) => event.stopPropagation()}
+                className="w-32 px-2 py-1 text-xs border border-border rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                autoFocus
+              />
+              <button
+                className="w-6 h-6 bg-green-50 hover:bg-green-100 dark:bg-green-900/20 dark:hover:bg-green-900/40 rounded flex items-center justify-center"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  saveEditedSession();
+                }}
+                title={t('tooltips.save')}
+              >
+                <Check className="w-3 h-3 text-green-600 dark:text-green-400" />
+              </button>
+              <button
+                className="w-6 h-6 bg-gray-50 hover:bg-gray-100 dark:bg-gray-900/20 dark:hover:bg-gray-900/40 rounded flex items-center justify-center"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCancelEditingSession();
+                }}
+                title={t('tooltips.cancel')}
+              >
+                <X className="w-3 h-3 text-gray-600 dark:text-gray-400" />
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className={cn(
+                  'w-6 h-6 rounded flex items-center justify-center transition-colors',
+                  isStarred
+                    ? 'hover:bg-yellow-50 dark:hover:bg-yellow-900/20'
+                    : 'hover:bg-accent',
+                )}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleStar();
+                }}
+                title={isStarred ? t('tooltips.removeFromFavorites') : t('tooltips.addToFavorites')}
+              >
+                <Star
+                  className={cn(
+                    'w-3 h-3 transition-colors',
+                    isStarred
+                      ? 'text-yellow-600 dark:text-yellow-400 fill-current'
+                      : 'text-muted-foreground',
+                  )}
+                />
+              </button>
+              {!sessionView.isCursorSession && !sessionView.isCodexSession && (
                 <button
-                  className="w-6 h-6 bg-gray-50 hover:bg-gray-100 dark:bg-gray-900/20 dark:hover:bg-gray-900/40 rounded flex items-center justify-center"
+                  className="w-6 h-6 hover:bg-accent rounded flex items-center justify-center"
                   onClick={(event) => {
                     event.stopPropagation();
-                    onCancelEditingSession();
+                    onStartEditingSession(session.id, session.summary || t('projects.newSession'));
                   }}
-                  title={t('tooltips.cancel')}
+                  title={t('tooltips.editSessionName')}
                 >
-                  <X className="w-3 h-3 text-gray-600 dark:text-gray-400" />
+                  <Edit2 className="w-3 h-3 text-muted-foreground" />
                 </button>
-              </>
-            ) : (
-              <>
-                {!sessionView.isCodexSession && (
-                  <button
-                    className="w-6 h-6 bg-gray-50 hover:bg-gray-100 dark:bg-gray-900/20 dark:hover:bg-gray-900/40 rounded flex items-center justify-center"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onStartEditingSession(session.id, session.summary || t('projects.newSession'));
-                    }}
-                    title={t('tooltips.editSessionName')}
-                  >
-                    <Edit2 className="w-3 h-3 text-gray-600 dark:text-gray-400" />
-                  </button>
-                )}
+              )}
+              {!sessionView.isCursorSession && (
                 <button
-                  className="w-6 h-6 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 rounded flex items-center justify-center"
+                  className="w-6 h-6 hover:bg-red-50 dark:hover:bg-red-900/20 rounded flex items-center justify-center"
                   onClick={(event) => {
                     event.stopPropagation();
                     requestDeleteSession();
@@ -226,10 +265,10 @@ export default function SidebarSessionItem({
                 >
                   <Trash2 className="w-3 h-3 text-red-600 dark:text-red-400" />
                 </button>
-              </>
-            )}
-          </div>
-        )}
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
