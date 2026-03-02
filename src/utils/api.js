@@ -86,6 +86,12 @@ export const api = {
     authenticatedFetch(`/api/projects/${projectName}/sessions/${sessionId}/star`, {
       method: 'PUT',
     }),
+  markSessionRead: (projectName, sessionId, readAt) =>
+    authenticatedFetch(`/api/projects/${projectName}/sessions/${sessionId}/read`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readAt }),
+    }),
   deleteSession: (projectName, sessionId) =>
     authenticatedFetch(`/api/projects/${projectName}/sessions/${sessionId}`, {
       method: 'DELETE',

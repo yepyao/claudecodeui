@@ -23,6 +23,8 @@ const compareVersions = (v1: string, v2: string) => {
 
 export type InstallMode = 'git' | 'npm';
 
+const DISABLED = import.meta.env.VITE_ENABLE_VERSION_CHECK !== 'true';
+
 export const useVersionCheck = (owner: string, repo: string) => {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
@@ -30,6 +32,7 @@ export const useVersionCheck = (owner: string, repo: string) => {
   const [installMode, setInstallMode] = useState<InstallMode>('git');
 
   useEffect(() => {
+    if (DISABLED) return;
     const fetchInstallMode = async () => {
       try {
         const response = await fetch('/health');
@@ -45,6 +48,7 @@ export const useVersionCheck = (owner: string, repo: string) => {
   }, []);
 
   useEffect(() => {
+    if (DISABLED) return;
     const checkVersion = async () => {
       try {
         const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/latest`);

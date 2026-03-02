@@ -43,6 +43,7 @@ export default function AppContent() {
     isLoadingProjects,
     isInputFocused,
     externalMessageUpdate,
+    markSessionAsRead,
     setActiveTab,
     setSidebarOpen,
     setIsInputFocused,
@@ -148,6 +149,7 @@ export default function AppContent() {
           onNavigateToSession={(targetSessionId: string) => navigate(`/session/${targetSessionId}`)}
           onShowSettings={() => setShowSettings(true)}
           externalMessageUpdate={externalMessageUpdate}
+          onMarkSessionAsRead={markSessionAsRead}
         />
       </div>
 

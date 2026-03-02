@@ -62,6 +62,11 @@ export function useSlashCommands({
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(-1);
   const [slashPosition, setSlashPosition] = useState(-1);
 
+  const projectName = selectedProject?.name ?? null;
+  const projectPath = selectedProject?.path ?? null;
+  const selectedProjectRef = useRef(selectedProject);
+  selectedProjectRef.current = selectedProject;
+
   const commandQueryTimerRef = useRef<number | null>(null);
 
   const clearCommandQueryTimer = useCallback(() => {
@@ -81,7 +86,7 @@ export function useSlashCommands({
 
   useEffect(() => {
     const fetchCommands = async () => {
-      if (!selectedProject) {
+      if (!projectName || !projectPath) {
         setSlashCommands([]);
         setFilteredCommands([]);
         return;
@@ -94,7 +99,7 @@ export function useSlashCommands({
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            projectPath: selectedProject.path,
+            projectPath,
           }),
         });
 
@@ -114,7 +119,7 @@ export function useSlashCommands({
           })),
         ];
 
-        const parsedHistory = readCommandHistory(selectedProject.name);
+        const parsedHistory = readCommandHistory(projectName);
         const sortedCommands = [...allCommands].sort((commandA, commandB) => {
           const commandAUsage = parsedHistory[commandA.name] || 0;
           const commandBUsage = parsedHistory[commandB.name] || 0;
@@ -129,7 +134,7 @@ export function useSlashCommands({
     };
 
     fetchCommands();
-  }, [selectedProject]);
+  }, [projectName, projectPath]);
 
   useEffect(() => {
     if (!showCommandMenu) {
@@ -169,11 +174,11 @@ export function useSlashCommands({
   }, [commandQuery, slashCommands, fuse]);
 
   const frequentCommands = useMemo(() => {
-    if (!selectedProject || slashCommands.length === 0) {
+    if (!projectName || slashCommands.length === 0) {
       return [];
     }
 
-    const parsedHistory = readCommandHistory(selectedProject.name);
+    const parsedHistory = readCommandHistory(projectName);
 
     return slashCommands
       .map((command) => ({
@@ -183,19 +188,20 @@ export function useSlashCommands({
       .filter((command) => command.usageCount > 0)
       .sort((commandA, commandB) => commandB.usageCount - commandA.usageCount)
       .slice(0, 5);
-  }, [selectedProject, slashCommands]);
+  }, [projectName, slashCommands]);
 
   const trackCommandUsage = useCallback(
     (command: SlashCommand) => {
-      if (!selectedProject) {
+      const project = selectedProjectRef.current;
+      if (!project) {
         return;
       }
 
-      const parsedHistory = readCommandHistory(selectedProject.name);
+      const parsedHistory = readCommandHistory(project.name);
       parsedHistory[command.name] = (parsedHistory[command.name] || 0) + 1;
-      saveCommandHistory(selectedProject.name, parsedHistory);
+      saveCommandHistory(project.name, parsedHistory);
     },
-    [selectedProject],
+    [],
   );
 
   const selectCommandFromKeyboard = useCallback(
@@ -221,7 +227,7 @@ export function useSlashCommands({
 
   const handleCommandSelect = useCallback(
     (command: SlashCommand | null, index: number, isHover: boolean) => {
-      if (!command || !selectedProject) {
+      if (!command || !selectedProjectRef.current) {
         return;
       }
 
@@ -244,7 +250,7 @@ export function useSlashCommands({
         resetCommandMenuState();
       }
     },
-    [selectedProject, trackCommandUsage, onExecuteCommand, resetCommandMenuState],
+    [trackCommandUsage, onExecuteCommand, resetCommandMenuState],
   );
 
   const handleToggleCommandMenu = useCallback(() => {

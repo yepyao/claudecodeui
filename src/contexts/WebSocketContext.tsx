@@ -66,6 +66,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       websocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          console.log('[WS ←]', data.type ?? 'unknown', data);
           setLatestMessage(data);
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
@@ -95,6 +96,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
   const sendMessage = useCallback((message: any) => {
     const socket = wsRef.current;
     if (socket && socket.readyState === WebSocket.OPEN) {
+      console.log('[WS →]', message.type ?? 'unknown', message);
       socket.send(JSON.stringify(message));
     } else {
       console.warn('WebSocket not connected');

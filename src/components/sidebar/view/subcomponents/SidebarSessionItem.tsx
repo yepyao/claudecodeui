@@ -15,6 +15,7 @@ type SidebarSessionItemProps = {
   isStarred: boolean;
   selectedSession: ProjectSession | null;
   currentTime: Date;
+  readTimestamps: Record<string, string>;
   editingSession: string | null;
   editingSessionName: string;
   onEditingSessionNameChange: (value: string) => void;
@@ -40,6 +41,7 @@ export default function SidebarSessionItem({
   isStarred,
   selectedSession,
   currentTime,
+  readTimestamps,
   editingSession,
   editingSessionName,
   onEditingSessionNameChange,
@@ -53,8 +55,9 @@ export default function SidebarSessionItem({
   touchHandlerFactory,
   t,
 }: SidebarSessionItemProps) {
-  const sessionView = createSessionViewModel(session, currentTime, t);
+  const sessionView = createSessionViewModel(session, currentTime, t, readTimestamps);
   const isSelected = selectedSession?.id === session.id;
+  const showUnread = sessionView.hasUnread && !isSelected;
 
   const selectMobileSession = () => {
     onProjectSelect(project);
@@ -75,9 +78,9 @@ export default function SidebarSessionItem({
 
   return (
     <div className="group relative">
-      {sessionView.isActive && (
+      {showUnread && (
         <div className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-1">
-          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+          <div className="w-2 h-2 bg-blue-500 rounded-full" />
         </div>
       )}
 
@@ -86,8 +89,8 @@ export default function SidebarSessionItem({
           className={cn(
             'p-2 mx-3 my-0.5 rounded-md bg-card border active:scale-[0.98] transition-all duration-150 relative',
             isSelected ? 'bg-primary/5 border-primary/20' : '',
-            !isSelected && sessionView.isActive
-              ? 'border-green-500/30 bg-green-50/5 dark:bg-green-900/5'
+            !isSelected && showUnread
+              ? 'border-blue-500/30 bg-blue-50/5 dark:bg-blue-900/5'
               : 'border-border/30',
           )}
           onClick={selectMobileSession}

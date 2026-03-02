@@ -1,3 +1,8 @@
+---
+name: cursor-chats-db
+description: Cursor SQLite chat database structure and query patterns. Use when working with Cursor's chat storage at ~/.cursor/chats/, reading session metadata, parsing blobs, or debugging session data.
+---
+
 # Cursor Chats Database Structure
 
 ## Overview

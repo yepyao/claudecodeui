@@ -732,7 +732,7 @@ export function useChatComposerState({
   }, [selectedProject?.name]);
 
   useEffect(() => {
-    if (!selectedProject) {
+    if (!selectedProject?.name) {
       return;
     }
     if (input !== '') {
@@ -740,7 +740,7 @@ export function useChatComposerState({
     } else {
       safeLocalStorage.removeItem(`draft_input_${selectedProject.name}`);
     }
-  }, [input, selectedProject]);
+  }, [input, selectedProject?.name]);
 
   useEffect(() => {
     if (!textareaRef.current) {

@@ -44,7 +44,7 @@ import pty from 'node-pty';
 import fetch from 'node-fetch';
 import mime from 'mime-types';
 
-import { getProjects, getClaudeSessions, getCursorSessions, getSessionMessages, renameProject, toggleStarProject, toggleStarSession, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
+import { getProjects, getClaudeSessions, getCursorSessions, getSessionMessages, renameProject, toggleStarProject, toggleStarSession, markSessionRead, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, extractCursorProjectPath, clearProjectDirectoryCache } from './projects.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval } from './claude-sdk.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive, getActiveCodexSessions } from './openai-codex.js';
@@ -141,8 +141,29 @@ async function setupProjectsWatcher() {
                 // Clear project directory cache when files change
                 clearProjectDirectoryCache();
 
-                // Get updated projects list
-                const updatedProjects = await getProjects(broadcastProgress);
+                // Get updated projects list (no progress broadcast for watcher-triggered refreshes)
+                const updatedProjects = await getProjects();
+
+                const changedFile = path.relative(rootPath, filePath).replace(/\\/g, '/');
+                const changedParts = changedFile.split('/');
+
+                const allSessionIds = new Set();
+                for (const p of updatedProjects) {
+                    for (const s of (p.sessions || [])) allSessionIds.add(s.id);
+                    for (const s of (p.cursorSessions || [])) allSessionIds.add(s.id);
+                    for (const s of (p.codexSessions || [])) allSessionIds.add(s.id);
+                    for (const s of (p.geminiSessions || [])) allSessionIds.add(s.id);
+                }
+
+                const matchesKnownSession = changedParts.some(part => {
+                    if (allSessionIds.has(part)) return true;
+                    const withoutExt = part.replace(/\.jsonl$/, '');
+                    return withoutExt !== part && allSessionIds.has(withoutExt);
+                });
+
+                if (!matchesKnownSession) {
+                    return;
+                }
 
                 // Notify all connected clients about the project changes
                 const updateMessage = JSON.stringify({
@@ -150,7 +171,7 @@ async function setupProjectsWatcher() {
                     projects: updatedProjects,
                     timestamp: new Date().toISOString(),
                     changeType: eventType,
-                    changedFile: path.relative(rootPath, filePath),
+                    changedFile,
                     watchProvider: provider
                 });
 
@@ -495,8 +516,10 @@ app.get('/api/projects/:projectName/sessions', authenticateToken, async (req, re
         const starredIds = starred ? starred.split(',').filter(Boolean) : [];
         
         if (provider === 'cursor') {
-            // For Cursor sessions, we need the project path
-            const projectPath = await extractProjectDirectory(req.params.projectName).catch(() => null);
+            // For Cursor sessions, use extractCursorProjectPath (reads .workspace-trusted)
+            // Fall back to extractProjectDirectory for projects that only exist in Claude
+            const projectPath = await extractCursorProjectPath(req.params.projectName).catch(() => null)
+                || await extractProjectDirectory(req.params.projectName).catch(() => null);
             if (!projectPath) {
                 return res.json({ sessions: [], hasMore: false, total: 0 });
             }
@@ -563,6 +586,16 @@ app.put('/api/projects/:projectName/sessions/:sessionId/star', authenticateToken
     try {
         const starred = await toggleStarSession(req.params.projectName, req.params.sessionId);
         res.json({ success: true, starred });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Mark session as read
+app.put('/api/projects/:projectName/sessions/:sessionId/read', authenticateToken, async (req, res) => {
+    try {
+        const readAt = await markSessionRead(req.params.projectName, req.params.sessionId, req.body?.readAt);
+        res.json({ success: true, readAt });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

@@ -1,3 +1,8 @@
+---
+name: debug-api-changes
+description: Test server-side code changes without restarting the server. Use when modifying files in server/, verifying API endpoint behavior, or testing with JWT authentication.
+---
+
 # Debug API Changes
 
 Test server-side code changes without restarting the server.
