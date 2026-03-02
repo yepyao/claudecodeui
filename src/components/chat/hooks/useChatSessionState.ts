@@ -30,6 +30,7 @@ interface UseChatSessionStateArgs {
   processingSessions?: Set<string>;
   resetStreamingState: () => void;
   pendingViewSessionRef: MutableRefObject<PendingViewSession | null>;
+  onMarkSessionAsRead?: (projectName: string, sessionId: string) => void;
 }
 
 interface ScrollRestoreState {
@@ -47,6 +48,7 @@ export function useChatSessionState({
   processingSessions,
   resetStreamingState,
   pendingViewSessionRef,
+  onMarkSessionAsRead,
 }: UseChatSessionStateArgs) {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => {
     if (typeof window !== 'undefined' && selectedProject) {
@@ -81,6 +83,16 @@ export function useChatSessionState({
   const [isLoadingAllMessages, setIsLoadingAllMessages] = useState(false);
   const [loadAllJustFinished, setLoadAllJustFinished] = useState(false);
   const [showLoadAllOverlay, setShowLoadAllOverlay] = useState(false);
+
+  const projectName = selectedProject?.name ?? null;
+  const projectPath = selectedProject?.fullPath || selectedProject?.path || '';
+  const sessionId = selectedSession?.id ?? null;
+  const sessionProvider = selectedSession?.__provider ?? 'claude';
+
+  const selectedProjectRef = useRef(selectedProject);
+  const selectedSessionRef = useRef(selectedSession);
+  selectedProjectRef.current = selectedProject;
+  selectedSessionRef.current = selectedSession;
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isLoadingSessionRef = useRef(false);
@@ -214,12 +226,14 @@ export function useChatSessionState({
         return false;
       }
       if (allMessagesLoadedRef.current) return false;
-      if (!hasMoreMessages || !selectedSession || !selectedProject) {
+      const session = selectedSessionRef.current;
+      const project = selectedProjectRef.current;
+      if (!hasMoreMessages || !session || !project) {
         return false;
       }
 
-      const sessionProvider = selectedSession.__provider || 'claude';
-      if (sessionProvider === 'cursor') {
+      const provider = session.__provider || 'claude';
+      if (provider === 'cursor') {
         return false;
       }
 
@@ -229,10 +243,10 @@ export function useChatSessionState({
 
       try {
         const moreMessages = await loadSessionMessages(
-          selectedProject.name,
-          selectedSession.id,
+          project.name,
+          session.id,
           true,
-          sessionProvider,
+          provider,
         );
 
         if (moreMessages.length === 0) {
@@ -244,14 +258,13 @@ export function useChatSessionState({
           top: previousScrollTop,
         };
         setSessionMessages((previous) => [...moreMessages, ...previous]);
-        // Keep the rendered window in sync with top-pagination so newly loaded history becomes visible.
         setVisibleMessageCount((previousCount) => previousCount + moreMessages.length);
         return true;
       } finally {
         isLoadingMoreRef.current = false;
       }
     },
-    [hasMoreMessages, isLoadingMoreMessages, loadSessionMessages, selectedProject, selectedSession],
+    [hasMoreMessages, isLoadingMoreMessages, loadSessionMessages],
   );
 
   const handleScroll = useCallback(async () => {
@@ -262,6 +275,10 @@ export function useChatSessionState({
 
     const nearBottom = isNearBottom();
     setIsUserScrolledUp(!nearBottom);
+
+    if (nearBottom && selectedProject?.name && selectedSession?.id) {
+      onMarkSessionAsRead?.(selectedProject.name, selectedSession.id);
+    }
 
     if (!allMessagesLoadedRef.current) {
       const scrolledNearTop = container.scrollTop < 100;
@@ -282,7 +299,7 @@ export function useChatSessionState({
         topLoadLockRef.current = true;
       }
     }
-  }, [isNearBottom, loadOlderMessages]);
+  }, [isNearBottom, loadOlderMessages, onMarkSessionAsRead, selectedProject?.name, selectedSession?.id]);
 
   useLayoutEffect(() => {
     if (!pendingScrollRestoreRef.current || !scrollContainerRef.current) {
@@ -323,11 +340,14 @@ export function useChatSessionState({
 
   useEffect(() => {
     const loadMessages = async () => {
-      if (selectedSession && selectedProject) {
+      const project = selectedProjectRef.current;
+      const session = selectedSessionRef.current;
+
+      if (sessionId && projectName && project && session) {
         const provider = (localStorage.getItem('selected-provider') as Provider) || 'claude';
         isLoadingSessionRef.current = true;
 
-        const sessionChanged = currentSessionId !== null && currentSessionId !== selectedSession.id;
+        const sessionChanged = currentSessionId !== null && currentSessionId !== sessionId;
         if (sessionChanged) {
           if (!isSystemSessionChange) {
             resetStreamingState();
@@ -355,7 +375,7 @@ export function useChatSessionState({
           if (ws) {
             sendMessage({
               type: 'check-session-status',
-              sessionId: selectedSession.id,
+              sessionId,
               provider,
             });
           }
@@ -367,33 +387,32 @@ export function useChatSessionState({
           if (ws) {
             sendMessage({
               type: 'check-session-status',
-              sessionId: selectedSession.id,
+              sessionId,
               provider,
             });
           }
         }
 
         if (provider === 'cursor') {
-          setCurrentSessionId(selectedSession.id);
-          sessionStorage.setItem('cursorSessionId', selectedSession.id);
+          setCurrentSessionId(sessionId);
+          sessionStorage.setItem('cursorSessionId', sessionId);
 
           if (!isSystemSessionChange) {
-            const projectPath = selectedProject.fullPath || selectedProject.path || '';
-            const converted = await loadCursorSessionMessages(projectPath, selectedSession.id);
+            const converted = await loadCursorSessionMessages(projectPath, sessionId);
             setSessionMessages([]);
             setChatMessages(converted);
           } else {
             setIsSystemSessionChange(false);
           }
         } else {
-          setCurrentSessionId(selectedSession.id);
+          setCurrentSessionId(sessionId);
 
           if (!isSystemSessionChange) {
             const messages = await loadSessionMessages(
-              selectedProject.name,
-              selectedSession.id,
+              projectName,
+              sessionId,
               false,
-              selectedSession.__provider || 'claude',
+              session.__provider || 'claude',
             );
             setSessionMessages(messages);
           } else {
@@ -431,15 +450,22 @@ export function useChatSessionState({
     loadCursorSessionMessages,
     loadSessionMessages,
     pendingViewSessionRef,
+    projectName,
+    projectPath,
     resetStreamingState,
-    selectedProject,
-    selectedSession,
     sendMessage,
+    sessionId,
     ws,
   ]);
 
   useEffect(() => {
-    if (!externalMessageUpdate || !selectedSession || !selectedProject) {
+    if (!externalMessageUpdate || !sessionId || !projectName) {
+      return;
+    }
+
+    const project = selectedProjectRef.current;
+    const session = selectedSessionRef.current;
+    if (!project || !session) {
       return;
     }
 
@@ -448,18 +474,18 @@ export function useChatSessionState({
         const provider = (localStorage.getItem('selected-provider') as Provider) || 'claude';
 
         if (provider === 'cursor') {
-          const projectPath = selectedProject.fullPath || selectedProject.path || '';
-          const converted = await loadCursorSessionMessages(projectPath, selectedSession.id);
+          const path = project.fullPath || project.path || '';
+          const converted = await loadCursorSessionMessages(path, session.id);
           setSessionMessages([]);
           setChatMessages(converted);
           return;
         }
 
         const messages = await loadSessionMessages(
-          selectedProject.name,
-          selectedSession.id,
+          project.name,
+          session.id,
           false,
-          selectedSession.__provider || 'claude',
+          session.__provider || 'claude',
         );
         setSessionMessages(messages);
 
@@ -479,9 +505,9 @@ export function useChatSessionState({
     isNearBottom,
     loadCursorSessionMessages,
     loadSessionMessages,
+    projectName,
     scrollToBottom,
-    selectedProject,
-    selectedSession,
+    sessionId,
   ]);
 
   useEffect(() => {
@@ -497,25 +523,24 @@ export function useChatSessionState({
   }, [convertedMessages, sessionMessages.length]);
 
   useEffect(() => {
-    if (selectedProject && chatMessages.length > 0) {
-      safeLocalStorage.setItem(`chat_messages_${selectedProject.name}`, JSON.stringify(chatMessages));
+    if (projectName && chatMessages.length > 0) {
+      safeLocalStorage.setItem(`chat_messages_${projectName}`, JSON.stringify(chatMessages));
     }
-  }, [chatMessages, selectedProject]);
+  }, [chatMessages, projectName]);
 
   useEffect(() => {
-    if (!selectedProject || !selectedSession?.id || selectedSession.id.startsWith('new-session-')) {
+    if (!projectName || !sessionId || sessionId.startsWith('new-session-')) {
       setTokenBudget(null);
       return;
     }
 
-    const sessionProvider = selectedSession.__provider || 'claude';
     if (sessionProvider !== 'claude') {
       return;
     }
 
     const fetchInitialTokenUsage = async () => {
       try {
-        const url = `/api/projects/${selectedProject.name}/sessions/${selectedSession.id}/token-usage`;
+        const url = `/api/projects/${projectName}/sessions/${sessionId}/token-usage`;
         const response = await authenticatedFetch(url);
         if (response.ok) {
           const data = await response.json();
@@ -529,7 +554,7 @@ export function useChatSessionState({
     };
 
     fetchInitialTokenUsage();
-  }, [selectedProject, selectedSession?.id, selectedSession?.__provider]);
+  }, [projectName, sessionId, sessionProvider]);
 
   const visibleMessages = useMemo(() => {
     if (chatMessages.length <= visibleMessageCount) {
@@ -621,10 +646,12 @@ export function useChatSessionState({
   }, [isLoadingMoreMessages, hasMoreMessages]);
 
   const loadAllMessages = useCallback(async () => {
-    if (!selectedSession || !selectedProject) return;
+    const session = selectedSessionRef.current;
+    const project = selectedProjectRef.current;
+    if (!session || !project) return;
     if (isLoadingAllMessages) return;
-    const sessionProvider = selectedSession.__provider || 'claude';
-    if (sessionProvider === 'cursor') {
+    const provider = session.__provider || 'claude';
+    if (provider === 'cursor') {
       setVisibleMessageCount(Infinity);
       setAllMessagesLoaded(true);
       allMessagesLoadedRef.current = true;
@@ -637,7 +664,7 @@ export function useChatSessionState({
       return;
     }
 
-    const requestSessionId = selectedSession.id;
+    const requestSessionId = session.id;
 
     allMessagesLoadedRef.current = true;
     isLoadingMoreRef.current = true;
@@ -650,11 +677,11 @@ export function useChatSessionState({
 
     try {
       const response = await (api.sessionMessages as any)(
-        selectedProject.name,
+        project.name,
         requestSessionId,
         null,
         0,
-        sessionProvider,
+        provider,
       );
 
       if (currentSessionId !== requestSessionId) return;
@@ -696,7 +723,7 @@ export function useChatSessionState({
       isLoadingMoreRef.current = false;
       setIsLoadingAllMessages(false);
     }
-  }, [selectedSession, selectedProject, isLoadingAllMessages, currentSessionId]);
+  }, [isLoadingAllMessages, currentSessionId]);
 
   const loadEarlierMessages = useCallback(() => {
     setVisibleMessageCount((previousCount) => previousCount + 100);

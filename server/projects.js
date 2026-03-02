@@ -478,6 +478,7 @@ async function buildClaudeProject(projectName, config) {
     isCustomName: !!customName,
     starred: !!projectConfig.starred,
     starredSessions: projectConfig.starredSessions || [],
+    readTimestamps: projectConfig.readTimestamps || {},
     sessions: [],
     cursorSessions: [],
     codexSessions: [],
@@ -547,6 +548,7 @@ async function buildManualProject(projectName, projectConfig) {
     isManuallyAdded: true,
     starred: !!projectConfig.starred,
     starredSessions: projectConfig.starredSessions || [],
+    readTimestamps: projectConfig.readTimestamps || {},
     sessions: [],
     cursorSessions: [],
     codexSessions: [],
@@ -605,6 +607,7 @@ async function getCursorProjects(progressCallback = null) {
         isCustomName: !!customName,
         starred: !!projectConfig.starred,
         starredSessions: projectConfig.starredSessions || [],
+        readTimestamps: projectConfig.readTimestamps || {},
         sessions: [],
         cursorSessions: cursorResult.sessions,
         codexSessions: [],
@@ -648,6 +651,9 @@ function mergeProjects(claudeProjects, cursorProjects, manualProjects = []) {
       }
       if (cursorProject.starredSessions?.length && !existing.starredSessions?.length) {
         existing.starredSessions = cursorProject.starredSessions;
+      }
+      if (cursorProject.readTimestamps && !existing.readTimestamps) {
+        existing.readTimestamps = cursorProject.readTimestamps;
       }
     } else {
       // Cursor-only project - add it with flag
@@ -1191,6 +1197,16 @@ async function toggleStarProject(projectName) {
   return config[projectName].starred;
 }
 
+// Mark a session as read (store client-provided timestamp to avoid network latency skew)
+async function markSessionRead(projectName, sessionId, readAt) {
+  const config = await loadProjectConfig();
+  config[projectName] = config[projectName] || {};
+  config[projectName].readTimestamps = config[projectName].readTimestamps || {};
+  config[projectName].readTimestamps[sessionId] = readAt || new Date().toISOString();
+  await saveProjectConfig(config);
+  return config[projectName].readTimestamps[sessionId];
+}
+
 // Toggle session starred status
 async function toggleStarSession(projectName, sessionId) {
   const config = await loadProjectConfig();
@@ -1466,9 +1482,8 @@ async function getCursorSessions(projectPath, limit = 5, offset = 0, starredSess
         const dbPath = path.join(sessionPath, 'store.db');
 
         try {
-          const stat = await fs.stat(dbPath);
-          
-          // Read metadata from store.db
+          await fs.access(dbPath);
+
           const db = await open({
             filename: dbPath,
             driver: sqlite3.Database,
@@ -1482,12 +1497,23 @@ async function getCursorSessions(projectPath, limit = 5, offset = 0, starredSess
           if (metaRow?.value) {
             const decoded = Buffer.from(metaRow.value, 'hex').toString('utf8');
             const meta = JSON.parse(decoded);
+
+            let createdAt = null;
+            if (meta.createdAt) {
+              createdAt = new Date(meta.createdAt).toISOString();
+            } else {
+              try {
+                const stat = await fs.stat(dbPath);
+                createdAt = stat.mtime.toISOString();
+              } catch {
+                createdAt = new Date().toISOString();
+              }
+            }
             
             return {
               id: e.name,
               name: meta.name || 'Cursor Session',
-              createdAt: meta.createdAt ? new Date(meta.createdAt).toISOString() : stat.mtime.toISOString(),
-              mtime: stat.mtime,
+              createdAt,
               messageCount: blobCount?.count || 0,
               model: meta.lastUsedModel,
               mode: meta.mode
@@ -1502,7 +1528,7 @@ async function getCursorSessions(projectPath, limit = 5, offset = 0, starredSess
 
     // Filter nulls and sort by last activity (most recent first)
     const validSessions = sessionsWithMeta.filter(Boolean);
-    validSessions.sort((a, b) => b.mtime - a.mtime);
+    validSessions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     const starredSet = new Set(starredSessionIds);
     const starredValidSessions = validSessions.filter(s => starredSet.has(s.id));
@@ -1514,17 +1540,12 @@ async function getCursorSessions(projectPath, limit = 5, offset = 0, starredSess
 
     // Return starred + paginated sessions
     for (const session of [...starredValidSessions, ...paginatedSessions]) {
-      // Use file mtime for sessions with messages, createdAt for empty sessions
-      const lastActivity = session.messageCount > 1 
-        ? session.mtime.toISOString() 
-        : session.createdAt;
-
       sessions.push({
         id: session.id,
         name: session.name,
         summary: session.name,
         createdAt: session.createdAt,
-        lastActivity: lastActivity,
+        lastActivity: session.createdAt,
         messageCount: session.messageCount,
         provider: 'cursor-agent'
       });
@@ -2011,8 +2032,10 @@ export {
   deleteProject,
   addProjectManually,
   extractProjectDirectory,
+  extractCursorProjectPath,
   clearProjectDirectoryCache,
   getCodexSessions,
   getCodexSessionMessages,
-  deleteCodexSession
+  deleteCodexSession,
+  markSessionRead
 };

@@ -37,6 +37,7 @@ export interface Project {
   path?: string;
   starred?: boolean;
   starredSessions?: string[];
+  readTimestamps?: Record<string, string>;
   sessions?: ProjectSession[];
   cursorSessions?: ProjectSession[];
   codexSessions?: ProjectSession[];

@@ -167,7 +167,7 @@ export function useSidebarController({
   }, [projects]);
 
   useEffect(() => {
-    if (selectedProject) {
+    if (selectedProject?.name) {
       setExpandedProjects((prev) => {
         if (prev.has(selectedProject.name)) {
           return prev;
@@ -177,7 +177,7 @@ export function useSidebarController({
         return next;
       });
     }
-  }, [selectedSession, selectedProject]);
+  }, [selectedSession?.id, selectedProject?.name]);
 
   useEffect(() => {
     if (projects.length > 0 && !isLoading) {

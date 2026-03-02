@@ -379,7 +379,6 @@ router.get('/sessions', async (req, res) => {
         // Check if store.db exists
         await fs.access(storeDbPath);
         
-        // Capture store.db mtime as a reliable fallback timestamp (last activity)
         try {
           const stat = await fs.stat(storeDbPath);
           dbStatMtimeMs = stat.mtimeMs;

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '../utils/api';
 import { useAuth } from './AuthContext';
 import { useWebSocket } from './WebSocketContext';
@@ -165,9 +165,13 @@ export const TaskMasterProvider = ({ children }) => {
     }
   }, [user, token]);
 
+  const currentProjectRef = useRef(currentProject);
+  currentProjectRef.current = currentProject;
+
   // Refresh tasks for current project - load real TaskMaster data
   const refreshTasks = useCallback(async () => {
-    if (!currentProject) {
+    const project = currentProjectRef.current;
+    if (!project) {
       setTasks([]);
       setNextTask(null);
       return;
@@ -185,7 +189,7 @@ export const TaskMasterProvider = ({ children }) => {
       clearError();
       
       // Load tasks from the TaskMaster API endpoint
-      const response = await api.get(`/taskmaster/tasks/${encodeURIComponent(currentProject.name)}`);
+      const response = await api.get(`/taskmaster/tasks/${encodeURIComponent(project.name)}`);
       
       if (!response.ok) {
         const errorData = await response.json();
@@ -212,7 +216,7 @@ export const TaskMasterProvider = ({ children }) => {
     } finally {
       setIsLoadingTasks(false);
     }
-  }, [currentProject, user, token]);
+  }, [user, token]);
 
   // Load initial data on mount or when auth changes
   useEffect(() => {

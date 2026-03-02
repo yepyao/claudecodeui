@@ -38,14 +38,16 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     setPermissionMode((savedMode as PermissionMode) || 'default');
   }, [selectedSession?.id]);
 
+  const sessionProvider = selectedSession?.__provider;
+
   useEffect(() => {
-    if (!selectedSession?.__provider || selectedSession.__provider === provider) {
+    if (!sessionProvider || sessionProvider === provider) {
       return;
     }
 
-    setProvider(selectedSession.__provider);
-    localStorage.setItem('selected-provider', selectedSession.__provider);
-  }, [provider, selectedSession]);
+    setProvider(sessionProvider);
+    localStorage.setItem('selected-provider', sessionProvider);
+  }, [provider, sessionProvider]);
 
   useEffect(() => {
     if (lastProviderRef.current === provider) {

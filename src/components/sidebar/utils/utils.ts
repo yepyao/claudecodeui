@@ -66,15 +66,19 @@ export const createSessionViewModel = (
   session: SessionWithProvider,
   currentTime: Date,
   t: TFunction,
+  readTimestamps?: Record<string, string>,
 ): SessionViewModel => {
   const sessionDate = getSessionDate(session);
-  const diffInMinutes = Math.floor((currentTime.getTime() - sessionDate.getTime()) / (1000 * 60));
+  const lastReadAt = readTimestamps?.[session.id];
+  const hasUnread = lastReadAt
+    ? sessionDate.getTime() > new Date(lastReadAt).getTime()
+    : Number(session.messageCount || 0) > 0;
 
   return {
     isCursorSession: session.__provider === 'cursor',
     isCodexSession: session.__provider === 'codex',
     isGeminiSession: session.__provider === 'gemini',
-    isActive: diffInMinutes < 10,
+    hasUnread,
     sessionName: getSessionName(session, t),
     sessionTime: getSessionTime(session),
     messageCount: Number(session.messageCount || 0),

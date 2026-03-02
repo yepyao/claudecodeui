@@ -38,6 +38,7 @@ function ChatInterface({
   autoScrollToBottom,
   sendByCtrlEnter,
   externalMessageUpdate,
+  onMarkSessionAsRead,
   onShowAllTasks,
 }: ChatInterfaceProps) {
   const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings();
@@ -120,6 +121,7 @@ function ChatInterface({
     processingSessions,
     resetStreamingState,
     pendingViewSessionRef,
+    onMarkSessionAsRead,
   });
 
   const {

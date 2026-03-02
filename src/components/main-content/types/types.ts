@@ -53,6 +53,7 @@ export type MainContentProps = {
   onNavigateToSession: (targetSessionId: string) => void;
   onShowSettings: () => void;
   externalMessageUpdate: number;
+  onMarkSessionAsRead?: (projectName: string, sessionId: string) => void;
 };
 
 export type MainContentHeaderProps = {

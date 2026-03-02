@@ -147,6 +147,8 @@ export function useProjectsState({
   const [externalMessageUpdate, setExternalMessageUpdate] = useState(0);
 
   const loadingProgressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastReadMarkRef = useRef<{ key: string; time: number } | null>(null);
+  const lastProcessedMessageRef = useRef<AppSocketMessage | null>(null);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -213,25 +215,12 @@ export function useProjectsState({
       return;
     }
 
-    const projectsMessage = latestMessage as ProjectsUpdatedMessage;
-
-    if (projectsMessage.changedFile && selectedSession && selectedProject) {
-      const normalized = projectsMessage.changedFile.replace(/\\/g, '/');
-      const changedFileParts = normalized.split('/');
-
-      if (changedFileParts.length >= 2) {
-        const filename = changedFileParts[changedFileParts.length - 1];
-        const changedSessionId = filename.replace('.jsonl', '');
-
-        if (changedSessionId === selectedSession.id) {
-          const isSessionActive = activeSessions.has(selectedSession.id);
-
-          if (!isSessionActive) {
-            setExternalMessageUpdate((prev) => prev + 1);
-          }
-        }
-      }
+    if (latestMessage === lastProcessedMessageRef.current) {
+      return;
     }
+    lastProcessedMessageRef.current = latestMessage;
+
+    const projectsMessage = latestMessage as ProjectsUpdatedMessage;
 
     const hasActiveSession =
       (selectedSession && activeSessions.has(selectedSession.id)) ||
@@ -246,7 +235,62 @@ export function useProjectsState({
       return;
     }
 
-    setProjects(updatedProjects);
+    if (projectsMessage.changedFile && selectedSession && selectedProject) {
+      const normalized = projectsMessage.changedFile.replace(/\\/g, '/');
+      const changedFileParts = normalized.split('/');
+
+      if (changedFileParts.length >= 2) {
+        const filename = changedFileParts[changedFileParts.length - 1];
+        const changedSessionId = filename.replace('.jsonl', '');
+        const matchesFilename = changedSessionId === selectedSession.id;
+
+        const matchesParentDir = changedFileParts.some((part) => part === selectedSession.id);
+
+        const matchesSession = matchesFilename || matchesParentDir;
+
+        if (matchesSession) {
+          const isSessionActive = activeSessions.has(selectedSession.id);
+          console.log(
+            `[WS] Session file update detected: ${normalized} → session=${selectedSession.id}, active=${isSessionActive}`,
+          );
+
+          if (!isSessionActive) {
+            setExternalMessageUpdate((prev) => prev + 1);
+          }
+        }
+      }
+    }
+
+    setProjects((prevProjects) => {
+      if (prevProjects.length === 0) {
+        return updatedProjects;
+      }
+
+      const prevTimestampsMap = new Map<string, Record<string, string>>();
+      for (const p of prevProjects) {
+        if (p.readTimestamps && Object.keys(p.readTimestamps).length > 0) {
+          prevTimestampsMap.set(p.name, p.readTimestamps);
+        }
+      }
+
+      if (prevTimestampsMap.size === 0) {
+        return updatedProjects;
+      }
+
+      return updatedProjects.map((project) => {
+        const localTimestamps = prevTimestampsMap.get(project.name);
+        if (!localTimestamps) {
+          return project;
+        }
+        const merged = { ...project.readTimestamps };
+        for (const [sid, ts] of Object.entries(localTimestamps)) {
+          if (!merged[sid] || new Date(ts) > new Date(merged[sid])) {
+            merged[sid] = ts;
+          }
+        }
+        return { ...project, readTimestamps: merged };
+      });
+    });
 
     if (!selectedProject) {
       return;
@@ -367,6 +411,28 @@ export function useProjectsState({
     [isMobile, navigate],
   );
 
+  const markSessionAsRead = useCallback(
+    (projectName: string, sessionId: string) => {
+      const key = `${projectName}:${sessionId}`;
+      const now = Date.now();
+      const last = lastReadMarkRef.current;
+      if (last && last.key === key && now - last.time < 10_000) {
+        return;
+      }
+      lastReadMarkRef.current = { key, time: now };
+
+      setProjects((prev) =>
+        prev.map((project) =>
+          project.name === projectName
+            ? { ...project, readTimestamps: { ...project.readTimestamps, [sessionId]: new Date(now).toISOString() } }
+            : project,
+        ),
+      );
+      void api.markSessionRead(projectName, sessionId, new Date(now).toISOString());
+    },
+    [],
+  );
+
   const handleSessionSelect = useCallback(
     (session: ProjectSession) => {
       setSelectedSession(session);
@@ -380,6 +446,11 @@ export function useProjectsState({
         sessionStorage.setItem('cursorSessionId', session.id);
       }
 
+      const projectName = session.__projectName || selectedProject?.name;
+      if (projectName) {
+        markSessionAsRead(projectName, session.id);
+      }
+
       if (isMobile) {
         const sessionProjectName = session.__projectName;
         const currentProjectName = selectedProject?.name;
@@ -391,7 +462,7 @@ export function useProjectsState({
 
       navigate(`/session/${session.id}`);
     },
-    [activeTab, isMobile, navigate, selectedProject?.name],
+    [activeTab, isMobile, markSessionAsRead, navigate, selectedProject?.name],
   );
 
   const handleNewSession = useCallback(
@@ -544,6 +615,7 @@ export function useProjectsState({
     openSettings,
     fetchProjects,
     sidebarSharedProps,
+    markSessionAsRead,
     handleProjectSelect,
     handleSessionSelect,
     handleNewSession,
