@@ -385,6 +385,8 @@ export function useSidebarController({
         response = await api.deleteCodexSession(sessionId);
       } else if (provider === 'gemini') {
         response = await api.deleteGeminiSession(sessionId);
+      } else if (provider === 'cursor') {
+        response = await api.deleteCursorSession(sessionId);
       } else {
         response = await api.deleteSession(projectName, sessionId);
       }
@@ -474,21 +476,34 @@ export function useSidebarController({
 
         // Load more Claude sessions
         if (claudeCanLoadMore) {
-          const currentClaudeCount =
-            (project.sessions?.length || 0) + (additionalSessions[project.name]?.length || 0);
-          
-          const projectStarredIds = [...(starredSessions.get(project.name) || [])];
+          const projectStarredSet = starredSessions.get(project.name);
+          const loadedClaude = [
+            ...(project.sessions || []),
+            ...(additionalSessions[project.name] || []),
+          ];
+          const nonStarredOffset = projectStarredSet
+            ? loadedClaude.filter((s) => !projectStarredSet.has(s.id)).length
+            : loadedClaude.length;
+
+          const projectStarredIds = [...(projectStarredSet || [])];
           loadPromises.push(
-            api.sessions(project.name, 5, currentClaudeCount, 'claude', projectStarredIds).then(async (response) => {
+            api.sessions(project.name, 5, nonStarredOffset, 'claude', projectStarredIds).then(async (response) => {
               if (!response.ok) return;
               const result = (await response.json()) as {
                 sessions?: ProjectSession[];
                 hasMore?: boolean;
               };
-              setAdditionalSessions((prev) => ({
-                ...prev,
-                [project.name]: [...(prev[project.name] || []), ...(result.sessions || [])],
-              }));
+              setAdditionalSessions((prev) => {
+                const existingIds = new Set([
+                  ...(project.sessions || []).map((s) => s.id),
+                  ...(prev[project.name] || []).map((s) => s.id),
+                ]);
+                const newSessions = (result.sessions || []).filter((s) => !existingIds.has(s.id));
+                return {
+                  ...prev,
+                  [project.name]: [...(prev[project.name] || []), ...newSessions],
+                };
+              });
               if (result.hasMore === false) {
                 setProjectHasMoreOverrides((prev) => ({ ...prev, [project.name]: false }));
               }
@@ -498,21 +513,34 @@ export function useSidebarController({
 
         // Load more Cursor sessions
         if (cursorCanLoadMore) {
-          const currentCursorCount =
-            (project.cursorSessions?.length || 0) + (additionalCursorSessions[project.name]?.length || 0);
-          
-          const cursorStarredIds = [...(starredSessions.get(project.name) || [])];
+          const cursorStarredSet = starredSessions.get(project.name);
+          const loadedCursor = [
+            ...(project.cursorSessions || []),
+            ...(additionalCursorSessions[project.name] || []),
+          ];
+          const cursorNonStarredOffset = cursorStarredSet
+            ? loadedCursor.filter((s) => !cursorStarredSet.has(s.id)).length
+            : loadedCursor.length;
+
+          const cursorStarredIds = [...(cursorStarredSet || [])];
           loadPromises.push(
-            api.sessions(project.name, 5, currentCursorCount, 'cursor', cursorStarredIds).then(async (response) => {
+            api.sessions(project.name, 5, cursorNonStarredOffset, 'cursor', cursorStarredIds).then(async (response) => {
               if (!response.ok) return;
               const result = (await response.json()) as {
                 sessions?: ProjectSession[];
                 hasMore?: boolean;
               };
-              setAdditionalCursorSessions((prev) => ({
-                ...prev,
-                [project.name]: [...(prev[project.name] || []), ...(result.sessions || [])],
-              }));
+              setAdditionalCursorSessions((prev) => {
+                const existingIds = new Set([
+                  ...(project.cursorSessions || []).map((s) => s.id),
+                  ...(prev[project.name] || []).map((s) => s.id),
+                ]);
+                const newSessions = (result.sessions || []).filter((s) => !existingIds.has(s.id));
+                return {
+                  ...prev,
+                  [project.name]: [...(prev[project.name] || []), ...newSessions],
+                };
+              });
               if (result.hasMore === false) {
                 setCursorHasMoreOverrides((prev) => ({ ...prev, [project.name]: false }));
               }
