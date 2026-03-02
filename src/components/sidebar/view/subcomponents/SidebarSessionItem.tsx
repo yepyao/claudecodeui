@@ -15,7 +15,6 @@ type SidebarSessionItemProps = {
   isStarred: boolean;
   selectedSession: ProjectSession | null;
   currentTime: Date;
-  readTimestamps: Record<string, string>;
   editingSession: string | null;
   editingSessionName: string;
   onEditingSessionNameChange: (value: string) => void;
@@ -41,7 +40,6 @@ export default function SidebarSessionItem({
   isStarred,
   selectedSession,
   currentTime,
-  readTimestamps,
   editingSession,
   editingSessionName,
   onEditingSessionNameChange,
@@ -55,7 +53,7 @@ export default function SidebarSessionItem({
   touchHandlerFactory,
   t,
 }: SidebarSessionItemProps) {
-  const sessionView = createSessionViewModel(session, currentTime, t, readTimestamps);
+  const sessionView = createSessionViewModel(session, currentTime, t);
   const isSelected = selectedSession?.id === session.id;
   const showUnread = sessionView.hasUnread && !isSelected;
 

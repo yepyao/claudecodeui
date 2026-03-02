@@ -417,7 +417,6 @@ export default function SidebarProjectItem({
         initialSessionsLoaded={initialSessionsLoaded}
         isLoadingSessions={isLoadingSessions}
         currentTime={currentTime}
-        readTimestamps={project.readTimestamps || {}}
         editingSession={editingSession}
         editingSessionName={editingSessionName}
         onEditingSessionNameChange={onEditingSessionNameChange}

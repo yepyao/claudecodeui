@@ -66,13 +66,22 @@ export const createSessionViewModel = (
   session: SessionWithProvider,
   currentTime: Date,
   t: TFunction,
-  readTimestamps?: Record<string, string>,
 ): SessionViewModel => {
   const sessionDate = getSessionDate(session);
-  const lastReadAt = readTimestamps?.[session.id];
-  const hasUnread = lastReadAt
-    ? sessionDate.getTime() > new Date(lastReadAt).getTime()
-    : Number(session.messageCount || 0) > 0;
+
+  const hasUnread = (() => {
+    if (session.__provider === 'cursor') {
+      // Cursor sessions use blob offset for read tracking
+      const lastBlob = session.lastBlobOffset ?? 0;
+      const readBlob = session.readBlobOffset ?? 0;
+      return lastBlob > readBlob;
+    }
+    // Claude/Codex/Gemini sessions use timestamp for read tracking
+    const readAt = session.readAt;
+    return readAt
+      ? sessionDate.getTime() > new Date(readAt).getTime()
+      : Number(session.messageCount || 0) > 0;
+  })();
 
   return {
     isCursorSession: session.__provider === 'cursor',
@@ -89,7 +98,6 @@ export const getAllSessions = (
   project: Project,
   additionalSessions: AdditionalSessionsByProject,
   additionalCursorSessions: AdditionalSessionsByProject = {},
-  starredSessions: Map<string, Set<string>> = new Map(),
 ): SessionWithProvider[] => {
   const claudeSessions = [
     ...(project.sessions || []),
@@ -114,7 +122,6 @@ export const getAllSessions = (
     __provider: 'gemini' as const,
   }));
 
-  const projectStarred = starredSessions.get(project.name);
   const seen = new Set<string>();
   const allSessions = [...claudeSessions, ...cursorSessions, ...codexSessions, ...geminiSessions]
     .filter((session) => {
@@ -123,9 +130,10 @@ export const getAllSessions = (
       return true;
     });
 
+  // Sort: starred sessions first, then by date
   return allSessions.sort((a, b) => {
-    const aStarred = projectStarred?.has(a.id) ?? false;
-    const bStarred = projectStarred?.has(b.id) ?? false;
+    const aStarred = a.starred ?? false;
+    const bStarred = b.starred ?? false;
 
     if (aStarred && !bStarred) return -1;
     if (!aStarred && bStarred) return 1;

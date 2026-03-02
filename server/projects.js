@@ -66,6 +66,12 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import os from 'os';
 import sessionManager from './sessionManager.js';
+import {
+  getSessionConfig,
+  updateSessionConfig,
+  deleteSessionConfig,
+  getSessionConfigs,
+} from './session-config.js';
 
 // Import TaskMaster detection functions
 async function detectTaskMasterFolder(projectPath) {
@@ -396,17 +402,28 @@ async function getProjects(progressCallback = null) {
   // Add Codex and Gemini sessions to all merged projects
   const codexSessionsIndexRef = { sessionsByProject: null };
   for (const project of merged) {
-    // Add Codex sessions
+    // Add Codex sessions (with session config)
     try {
-      project.codexSessions = await getCodexSessions(project.fullPath, { indexRef: codexSessionsIndexRef });
+      project.codexSessions = await getCodexSessions(project.fullPath, { 
+        indexRef: codexSessionsIndexRef,
+        projectName: project.name 
+      });
     } catch (e) {
       console.warn(`Could not load Codex sessions for ${project.displayName}:`, e.message);
       project.codexSessions = [];
     }
     
-    // Add Gemini sessions
+    // Add Gemini sessions (with session config)
     try {
-      project.geminiSessions = sessionManager.getProjectSessions(project.fullPath) || [];
+      const rawGeminiSessions = sessionManager.getProjectSessions(project.fullPath) || [];
+      // Load session configs and merge into sessions
+      const sessionIds = rawGeminiSessions.map(s => s.id);
+      const configs = await getSessionConfigs(project.name, sessionIds);
+      project.geminiSessions = rawGeminiSessions.map(session => ({
+        ...session,
+        starred: configs[session.id]?.starred || false,
+        readAt: configs[session.id]?.readAt || null,
+      }));
     } catch (e) {
       console.warn(`Could not load Gemini sessions for ${project.displayName}:`, e.message);
       project.geminiSessions = [];
@@ -477,8 +494,6 @@ async function buildClaudeProject(projectName, config) {
     fullPath: actualProjectDir,
     isCustomName: !!customName,
     starred: !!projectConfig.starred,
-    starredSessions: projectConfig.starredSessions || [],
-    readTimestamps: projectConfig.readTimestamps || {},
     sessions: [],
     cursorSessions: [],
     codexSessions: [],
@@ -486,9 +501,9 @@ async function buildClaudeProject(projectName, config) {
     sessionMeta: { hasMore: false, total: 0 }
   };
 
-  // Fetch Claude sessions only
+  // Fetch Claude sessions only (session configs are now included in each session)
   try {
-    const sessionResult = await getClaudeSessions(projectName, 5, 0, project.starredSessions);
+    const sessionResult = await getClaudeSessions(projectName, 5, 0);
     project.sessions = sessionResult.sessions || [];
     project.sessionMeta = { hasMore: sessionResult.hasMore, total: sessionResult.total };
   } catch (e) {
@@ -547,8 +562,6 @@ async function buildManualProject(projectName, projectConfig) {
     isCustomName: !!projectConfig.displayName,
     isManuallyAdded: true,
     starred: !!projectConfig.starred,
-    starredSessions: projectConfig.starredSessions || [],
-    readTimestamps: projectConfig.readTimestamps || {},
     sessions: [],
     cursorSessions: [],
     codexSessions: [],
@@ -592,22 +605,23 @@ async function getCursorProjects(progressCallback = null) {
       }
 
       // Check config for custom display name
-      // Try Cursor format (localhome-...) and Claude format (-localhome-...)
-      const claudeEncodedName = '-' + entry.name;
-      const projectConfig = config[entry.name] || config[claudeEncodedName] || {};
+      // Use Claude format (-localhome-...) as canonical name, keep Cursor format for internal lookups
+      const cursorName = entry.name;
+      const canonicalName = '-' + entry.name;  // Claude format with leading dash
+      const projectConfig = config[canonicalName] || config[cursorName] || {};
 
-      const cursorResult = await getCursorSessions(projectPath, 5, 0, projectConfig.starredSessions || []);
+      // Session configs are now included in each session object
+      const cursorResult = await getCursorSessions(projectPath, 5, 0);
       const customName = projectConfig.displayName;
 
       projects.push({
-        name: entry.name,
+        name: canonicalName,              // Claude format (canonical)
+        cursorName: cursorName,           // Cursor format for internal lookups
         path: projectPath,
-        displayName: customName || await generateDisplayName(entry.name, projectPath),
+        displayName: customName || await generateDisplayName(cursorName, projectPath),
         fullPath: projectPath,
         isCustomName: !!customName,
         starred: !!projectConfig.starred,
-        starredSessions: projectConfig.starredSessions || [],
-        readTimestamps: projectConfig.readTimestamps || {},
         sessions: [],
         cursorSessions: cursorResult.sessions,
         codexSessions: [],
@@ -642,18 +656,13 @@ function mergeProjects(claudeProjects, cursorProjects, manualProjects = []) {
     const existing = projectsByPath.get(cursorProject.fullPath);
     
     if (existing) {
-      // Project exists - add Cursor sessions and metadata to it
+      // Project exists - add Cursor sessions, metadata, and cursorName to it
       existing.cursorSessions = cursorProject.cursorSessions;
       existing.cursorSessionMeta = cursorProject.cursorSessionMeta;
+      existing.cursorName = cursorProject.cursorName;  // Preserve Cursor format name for internal lookups
       // Merge starred info (prefer existing Claude project's config)
       if (!existing.starred && cursorProject.starred) {
         existing.starred = true;
-      }
-      if (cursorProject.starredSessions?.length && !existing.starredSessions?.length) {
-        existing.starredSessions = cursorProject.starredSessions;
-      }
-      if (cursorProject.readTimestamps && !existing.readTimestamps) {
-        existing.readTimestamps = cursorProject.readTimestamps;
       }
     } else {
       // Cursor-only project - add it with flag
@@ -831,9 +840,21 @@ async function getClaudeSessions(projectName, limit = 5, offset = 0, starredSess
       .filter(session => !session.summary.startsWith('{ "'))
       .sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity));
 
+    // Load session configs and merge into sessions
+    const sessionIds = visibleSessions.map(s => s.id);
+    const configs = await getSessionConfigs(projectName, sessionIds);
+    
+    const sessionsWithConfig = visibleSessions.map(session => ({
+      ...session,
+      starred: configs[session.id]?.starred || false,
+      readAt: configs[session.id]?.readAt || null,
+    }));
+
+    // Sort: starred sessions first, then by lastActivity
+    // For backward compatibility, also check starredSessionIds parameter
     const starredSet = new Set(starredSessionIds);
-    const starredSessions = visibleSessions.filter(s => starredSet.has(s.id));
-    const nonStarredSessions = visibleSessions.filter(s => !starredSet.has(s.id));
+    const starredSessions = sessionsWithConfig.filter(s => s.starred || starredSet.has(s.id));
+    const nonStarredSessions = sessionsWithConfig.filter(s => !s.starred && !starredSet.has(s.id));
 
     const total = nonStarredSessions.length;
     const paginatedSessions = nonStarredSessions.slice(offset, offset + limit);
@@ -1198,30 +1219,24 @@ async function toggleStarProject(projectName) {
 }
 
 // Mark a session as read (store client-provided timestamp to avoid network latency skew)
-async function markSessionRead(projectName, sessionId, readAt) {
-  const config = await loadProjectConfig();
-  config[projectName] = config[projectName] || {};
-  config[projectName].readTimestamps = config[projectName].readTimestamps || {};
-  config[projectName].readTimestamps[sessionId] = readAt || new Date().toISOString();
-  await saveProjectConfig(config);
-  return config[projectName].readTimestamps[sessionId];
+// For cursor sessions, readBlobOffset is used instead of readAt timestamp
+async function markSessionRead(projectName, sessionId, readAt, readBlobOffset) {
+  if (readBlobOffset !== undefined && readBlobOffset !== null) {
+    const config = await updateSessionConfig(projectName, sessionId, { readBlobOffset });
+    return { readBlobOffset: config.readBlobOffset };
+  } else {
+    const timestamp = readAt || new Date().toISOString();
+    const config = await updateSessionConfig(projectName, sessionId, { readAt: timestamp });
+    return { readAt: config.readAt };
+  }
 }
 
 // Toggle session starred status
 async function toggleStarSession(projectName, sessionId) {
-  const config = await loadProjectConfig();
-  config[projectName] = config[projectName] || {};
-  const starredSessions = new Set(config[projectName].starredSessions || []);
-
-  if (starredSessions.has(sessionId)) {
-    starredSessions.delete(sessionId);
-  } else {
-    starredSessions.add(sessionId);
-  }
-
-  config[projectName].starredSessions = [...starredSessions];
-  await saveProjectConfig(config);
-  return starredSessions.has(sessionId);
+  const currentConfig = await getSessionConfig(projectName, sessionId);
+  const newStarred = !currentConfig.starred;
+  await updateSessionConfig(projectName, sessionId, { starred: newStarred });
+  return newStarred;
 }
 
 // Delete a session from a project
@@ -1453,6 +1468,13 @@ async function extractCursorProjectPath(encodedName) {
   return '/' + encodedName.replace(/-/g, '/');
 }
 
+// Convert project path to canonical project name (Claude format with leading dash)
+// Used for session config lookups which use Claude format as canonical
+function encodeCursorProjectName(projectPath) {
+  // Result: /foo/bar -> -foo-bar (Claude format)
+  return projectPath.replace(/[\\/]/g, '-');
+}
+
 // Get Cursor sessions from ~/.cursor/chats/{cwdHash}/ store.db files
 // This reads directly from Cursor's chat storage which has proper session names
 async function getCursorSessions(projectPath, limit = 5, offset = 0, starredSessionIds = []) {
@@ -1463,6 +1485,9 @@ async function getCursorSessions(projectPath, limit = 5, offset = 0, starredSess
   const cwdHash = crypto.createHash('md5').update(projectPath).digest('hex');
   const chatsDir = path.join(os.homedir(), '.cursor', 'chats', cwdHash);
   const sessions = [];
+  
+  // Encode project path to project name for session config lookups
+  const projectName = encodeCursorProjectName(projectPath);
 
   try {
     await fs.access(chatsDir);
@@ -1515,6 +1540,7 @@ async function getCursorSessions(projectPath, limit = 5, offset = 0, starredSess
               name: meta.name || 'Cursor Session',
               createdAt,
               messageCount: blobCount?.count || 0,
+              lastBlobOffset: blobCount?.count || 0,
               model: meta.lastUsedModel,
               mode: meta.mode
             };
@@ -1530,9 +1556,21 @@ async function getCursorSessions(projectPath, limit = 5, offset = 0, starredSess
     const validSessions = sessionsWithMeta.filter(Boolean);
     validSessions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
+    // Load session configs and merge into sessions
+    const sessionIds = validSessions.map(s => s.id);
+    const configs = await getSessionConfigs(projectName, sessionIds);
+    
+    const sessionsWithConfig = validSessions.map(session => ({
+      ...session,
+      starred: configs[session.id]?.starred || false,
+      readBlobOffset: configs[session.id]?.readBlobOffset ?? null,
+    }));
+
+    // Sort: starred sessions first, then by createdAt
+    // For backward compatibility, also check starredSessionIds parameter
     const starredSet = new Set(starredSessionIds);
-    const starredValidSessions = validSessions.filter(s => starredSet.has(s.id));
-    const nonStarredValidSessions = validSessions.filter(s => !starredSet.has(s.id));
+    const starredValidSessions = sessionsWithConfig.filter(s => s.starred || starredSet.has(s.id));
+    const nonStarredValidSessions = sessionsWithConfig.filter(s => !s.starred && !starredSet.has(s.id));
 
     const total = nonStarredValidSessions.length;
     const paginatedSessions = nonStarredValidSessions.slice(offset, offset + limit);
@@ -1547,6 +1585,9 @@ async function getCursorSessions(projectPath, limit = 5, offset = 0, starredSess
         createdAt: session.createdAt,
         lastActivity: session.createdAt,
         messageCount: session.messageCount,
+        lastBlobOffset: session.lastBlobOffset,
+        starred: session.starred,
+        readBlobOffset: session.readBlobOffset,
         provider: 'cursor-agent'
       });
     }
@@ -1653,7 +1694,7 @@ async function buildCodexSessionsIndex() {
 
 // Fetch Codex sessions for a given project path
 async function getCodexSessions(projectPath, options = {}) {
-  const { limit = 5, indexRef = null } = options;
+  const { limit = 5, indexRef = null, projectName = null } = options;
   try {
     const normalizedProjectPath = normalizeComparablePath(projectPath);
     if (!normalizedProjectPath) {
@@ -1667,8 +1708,20 @@ async function getCodexSessions(projectPath, options = {}) {
     const sessionsByProject = indexRef?.sessionsByProject || await buildCodexSessionsIndex();
     const sessions = sessionsByProject.get(normalizedProjectPath) || [];
 
+    // Load session configs if we have a projectName
+    const configProjectName = projectName || encodeCursorProjectName(projectPath);
+    const sessionIds = sessions.map(s => s.id);
+    const configs = await getSessionConfigs(configProjectName, sessionIds);
+    
+    // Merge configs into sessions
+    const sessionsWithConfig = sessions.map(session => ({
+      ...session,
+      starred: configs[session.id]?.starred || false,
+      readAt: configs[session.id]?.readAt || null,
+    }));
+
     // Return limited sessions for performance (0 = unlimited for deletion)
-    return limit > 0 ? sessions.slice(0, limit) : [...sessions];
+    return limit > 0 ? sessionsWithConfig.slice(0, limit) : [...sessionsWithConfig];
 
   } catch (error) {
     console.error('Error fetching Codex sessions:', error);
@@ -2020,6 +2073,141 @@ async function deleteCodexSession(sessionId) {
   }
 }
 
+// ============================================================================
+// GET SESSION BY ID - For batch updates
+// ============================================================================
+
+async function getClaudeSessionById(projectName, sessionId) {
+  try {
+    const result = await getClaudeSessions(projectName, 1000, 0);
+    const session = result.sessions?.find(s => s.id === sessionId);
+    return session || null;
+  } catch (error) {
+    console.error(`Error getting Claude session ${sessionId}:`, error);
+    return null;
+  }
+}
+
+async function getCursorSessionById(projectPath, sessionId) {
+  if (!projectPath) return null;
+  
+  try {
+    const cwdHash = crypto.createHash('md5').update(projectPath).digest('hex');
+    const sessionPath = path.join(os.homedir(), '.cursor', 'chats', cwdHash, sessionId);
+    const dbPath = path.join(sessionPath, 'store.db');
+    
+    await fs.access(dbPath);
+    
+    const db = await open({
+      filename: dbPath,
+      driver: sqlite3.Database,
+      mode: sqlite3.OPEN_READONLY
+    });
+    
+    const metaRow = await db.get("SELECT value FROM meta WHERE key = '0'");
+    const blobCount = await db.get('SELECT COUNT(*) as count FROM blobs');
+    await db.close();
+    
+    if (!metaRow?.value) return null;
+    
+    const decoded = Buffer.from(metaRow.value, 'hex').toString('utf8');
+    const meta = JSON.parse(decoded);
+    
+    let createdAt = null;
+    if (meta.createdAt) {
+      createdAt = new Date(meta.createdAt).toISOString();
+    } else {
+      try {
+        const stat = await fs.stat(dbPath);
+        createdAt = stat.mtime.toISOString();
+      } catch {
+        createdAt = new Date().toISOString();
+      }
+    }
+    
+    // Get session config
+    const projectName = encodeCursorProjectName(projectPath);
+    const config = await getSessionConfig(projectName, sessionId);
+    
+    return {
+      id: sessionId,
+      name: meta.name || 'Cursor Session',
+      summary: meta.name || 'Cursor Session',
+      createdAt,
+      lastActivity: createdAt,
+      messageCount: blobCount?.count || 0,
+      lastBlobOffset: blobCount?.count || 0,
+      starred: config.starred || false,
+      readBlobOffset: config.readBlobOffset ?? null,
+      provider: 'cursor-agent'
+    };
+  } catch (error) {
+    console.error(`Error getting Cursor session ${sessionId}:`, error);
+    return null;
+  }
+}
+
+async function getCodexSessionById(projectPath, sessionId) {
+  try {
+    const codexSessionsDir = path.join(os.homedir(), '.codex', 'sessions');
+    const jsonlFiles = await findCodexJsonlFiles(codexSessionsDir);
+    
+    for (const filePath of jsonlFiles) {
+      const sessionData = await parseCodexSessionFile(filePath);
+      if (sessionData && sessionData.id === sessionId) {
+        // Get session config
+        const projectName = encodeCursorProjectName(projectPath);
+        const config = await getSessionConfig(projectName, sessionId);
+        
+        return {
+          id: sessionData.id,
+          summary: sessionData.summary || 'Codex Session',
+          messageCount: sessionData.messageCount || 0,
+          lastActivity: sessionData.timestamp ? new Date(sessionData.timestamp).toISOString() : new Date().toISOString(),
+          cwd: sessionData.cwd,
+          model: sessionData.model,
+          starred: config.starred || false,
+          readAt: config.readAt || null,
+          provider: 'codex'
+        };
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error(`Error getting Codex session ${sessionId}:`, error);
+    return null;
+  }
+}
+
+async function getGeminiSessionById(projectPath, sessionId) {
+  try {
+    const session = sessionManager.getSession(sessionId);
+    if (!session || session.projectPath !== projectPath) return null;
+    
+    // Get session config
+    const projectName = encodeCursorProjectName(projectPath);
+    const config = await getSessionConfig(projectName, sessionId);
+    
+    // Build summary
+    const summary = session.messages.length > 0 
+      ? (session.messages[0].content?.substring(0, 50) + '...' || 'Gemini Session')
+      : 'New Session';
+    
+    return {
+      id: session.id,
+      summary,
+      messageCount: session.messages.length,
+      lastActivity: session.lastActivity?.toISOString() || new Date().toISOString(),
+      starred: config.starred || false,
+      readAt: config.readAt || null,
+      provider: 'gemini'
+    };
+  } catch (error) {
+    console.error(`Error getting Gemini session ${sessionId}:`, error);
+    return null;
+  }
+}
+
 export {
   getProjects,
   getClaudeSessions,
@@ -2037,5 +2225,10 @@ export {
   getCodexSessions,
   getCodexSessionMessages,
   deleteCodexSession,
-  markSessionRead
+  markSessionRead,
+  encodeCursorProjectName,
+  getClaudeSessionById,
+  getCursorSessionById,
+  getCodexSessionById,
+  getGeminiSessionById
 };

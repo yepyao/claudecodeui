@@ -117,10 +117,10 @@ Frontend receives `sessions_updated`:
 
 ## Tasks
 
-### Phase 0: Session Config Refactoring (Pre-requisite)
+### Phase 0: Session Config Refactoring (Pre-requisite) ✅ COMPLETED
 
 #### Backend: New Session Config Structure
-- [ ] Create session config directory structure:
+- [x] Create session config directory structure:
   ```
   ~/.cloudcli/
     sessions/
@@ -128,7 +128,7 @@ Frontend receives `sessions_updated`:
         {session-id}.json      # Per-session config (starred, readAt, readBlobOffset)
     project-config.json        # Project-level config (displayName, starred, manuallyAdded)
   ```
-- [ ] Session config file format (`{session-id}.json`):
+- [x] Session config file format (`{session-id}.json`):
   ```json
   {
     "starred": true,
@@ -137,25 +137,25 @@ Frontend receives `sessions_updated`:
     "customName": "My custom session name"  // Optional user override
   }
   ```
-- [ ] Create `server/session-config.js` with functions:
+- [x] Create `server/session-config.js` with functions:
   - `getSessionConfig(projectName, sessionId)` - read config, return defaults if not exists
   - `updateSessionConfig(projectName, sessionId, updates)` - merge updates into config
   - `deleteSessionConfig(projectName, sessionId)` - remove config file
-- [ ] Migrate existing data:
+- [x] Migrate existing data:
   - Read `starredSessions` from old project config → create session configs
   - Read `readTimestamps` / `readBlobOffsets` → populate session configs
   - Keep old format readable for backward compatibility during transition
 
 #### Backend: Update Session Objects
-- [ ] Modify `getClaudeSessions()`, `getCursorSessions()`, `getCodexSessions()`, `getGeminiSessions()` to:
+- [x] Modify `getClaudeSessions()`, `getCursorSessions()`, `getCodexSessions()`, `getGeminiSessions()` to:
   - Load session config for each session
   - Include `starred`, `readAt`, `readBlobOffset` directly in session object
-- [ ] Update `toggleStarSession()` to use new session config
-- [ ] Update `markSessionRead()` to use new session config
-- [ ] Remove `readTimestamps`, `readBlobOffsets`, `starredSessions` from project-level response
+- [x] Update `toggleStarSession()` to use new session config
+- [x] Update `markSessionRead()` to use new session config
+- [x] Remove `readTimestamps`, `readBlobOffsets`, `starredSessions` from project-level response
 
 #### Frontend: Update Types and State
-- [ ] Update `ProjectSession` type to include:
+- [x] Update `ProjectSession` type to include:
   ```typescript
   interface ProjectSession {
     id: string;
@@ -166,35 +166,35 @@ Frontend receives `sessions_updated`:
     readBlobOffset?: number;
   }
   ```
-- [ ] Remove `readTimestamps` and `readBlobOffsets` from `Project` type
-- [ ] Update `useProjectsState.ts`:
+- [x] Remove `readTimestamps` and `readBlobOffsets` from `Project` type
+- [x] Update `useProjectsState.ts`:
   - Remove project-level read tracking logic
   - Update `markSessionAsRead()` to update session object directly
-- [ ] Update sidebar components to read `session.starred`, `session.readAt` instead of project-level maps
+- [x] Update sidebar components to read `session.starred`, `session.readAt` instead of project-level maps
 
-### Phase 1: Lightweight WebSocket Notification
+### Phase 1: Lightweight WebSocket Notification ✅ COMPLETED
 
 #### Backend Changes
-- [ ] Create helper function to get single session by ID for each provider
-- [ ] Add batch endpoint `POST /api/sessions/batch`
-- [ ] Modify `setupCursorPollingLoop()` to:
+- [x] Create helper function to get single session by ID for each provider
+- [x] Add batch endpoint `POST /api/sessions/batch`
+- [x] Modify `setupCursorPollingLoop()` to:
   - Track ALL Cursor sessions (scan all project folders, not just getProjects)
   - Send lightweight `sessions_updated` message
-- [ ] Modify `setupProjectsWatcher()` to:
+- [x] Modify `setupProjectsWatcher()` to:
   - Send lightweight `sessions_updated` message instead of full projects
   - Extract session ID from changed file path
-- [ ] Remove full `projects_updated` message (or keep as fallback for initial load)
+- [x] Remove full `projects_updated` message (or keep as fallback for initial load)
 
-### Phase 2: Frontend Handler
+### Phase 2: Frontend Handler ✅ COMPLETED
 
 #### Frontend Changes
-- [ ] Add handler for new `sessions_updated` message type in `useProjectsState.ts`
-- [ ] Create `api.fetchSessionsBatch()` function
-- [ ] Implement unified logic to:
+- [x] Add handler for new `sessions_updated` message type in `useProjectsState.ts`
+- [x] Create `api.fetchSessionsBatch()` function
+- [x] Implement unified logic to:
   - Compare updates with local state
   - Batch fetch changed sessions
   - Update both main sessions and additionalSessions states
-- [ ] Remove old `projects_updated` handler (or keep for backward compatibility during rollout)
+- [x] Remove old `projects_updated` handler (or keep for backward compatibility during rollout)
 
 ## Architecture Diagram
 

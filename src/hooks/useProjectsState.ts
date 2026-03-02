@@ -4,10 +4,14 @@ import { api } from '../utils/api';
 import type {
   AppSocketMessage,
   AppTab,
+  BatchSessionRequest,
+  BatchSessionResponse,
   LoadingProgress,
   Project,
   ProjectSession,
   ProjectsUpdatedMessage,
+  SessionProvider,
+  SessionsUpdatedMessage,
 } from '../types/app';
 
 type UseProjectsStateArgs = {
@@ -211,6 +215,106 @@ export function useProjectsState({
       return;
     }
 
+    // Handle lightweight sessions_updated messages
+    if (latestMessage.type === 'sessions_updated') {
+      if (latestMessage === lastProcessedMessageRef.current) {
+        return;
+      }
+      lastProcessedMessageRef.current = latestMessage;
+
+      const sessionsMessage = latestMessage as SessionsUpdatedMessage;
+      const { updates, watchProvider } = sessionsMessage;
+
+      // Build batch request for updated sessions
+      const requests: BatchSessionRequest[] = [];
+      
+      // The backend now sends project names (not hashes) for all providers
+      for (const [projectName, updateInfo] of Object.entries(updates)) {
+        for (const sessionId of updateInfo.sessionIds) {
+          requests.push({
+            projectName,
+            sessionId,
+            provider: updateInfo.provider as SessionProvider,
+          });
+        }
+      }
+
+      if (requests.length === 0) {
+        return;
+      }
+
+      // Batch fetch updated sessions
+      api.fetchSessionsBatch(requests).then(async (response) => {
+        if (!response.ok) return;
+        
+        const data = await response.json() as { results: BatchSessionResponse[] };
+        const updatedSessions = data.results.filter((r) => r.session !== null);
+        
+        if (updatedSessions.length === 0) return;
+
+        // Check if selected session was updated
+        if (selectedSession && selectedProject) {
+          const updatedSelectedSession = updatedSessions.find(
+            (r) => r.sessionId === selectedSession.id && r.projectName === selectedProject.name
+          );
+          if (updatedSelectedSession && !activeSessions.has(selectedSession.id)) {
+            setExternalMessageUpdate((prev) => prev + 1);
+          }
+        }
+
+        // Update sessions in projects state
+        setProjects((prevProjects) => {
+          return prevProjects.map((project) => {
+            // Project names now use Claude format consistently (e.g., -foo-bar)
+            const projectUpdates = updatedSessions.filter((r) => r.projectName === project.name);
+            if (projectUpdates.length === 0) return project;
+
+            const updateSessionInArray = (
+              sessions: ProjectSession[] | undefined,
+              provider: SessionProvider
+            ): ProjectSession[] | undefined => {
+              if (!sessions) sessions = [];
+              
+              // Update existing sessions
+              const updatedSessions = sessions.map((s) => {
+                const update = projectUpdates.find(
+                  (u) => u.sessionId === s.id && u.provider === provider
+                );
+                if (update?.session) {
+                  return { ...s, ...update.session };
+                }
+                return s;
+              });
+              
+              // Add sessions that were updated but not in the array (loaded via "Load More")
+              const existingIds = new Set(sessions.map((s) => s.id));
+              const newSessions = projectUpdates
+                .filter((u) => u.provider === provider && !existingIds.has(u.sessionId) && u.session)
+                .map((u) => u.session as ProjectSession);
+              
+              if (newSessions.length > 0) {
+                return [...updatedSessions, ...newSessions];
+              }
+              
+              return updatedSessions;
+            };
+
+            return {
+              ...project,
+              sessions: updateSessionInArray(project.sessions, 'claude'),
+              cursorSessions: updateSessionInArray(project.cursorSessions, 'cursor'),
+              codexSessions: updateSessionInArray(project.codexSessions, 'codex'),
+              geminiSessions: updateSessionInArray(project.geminiSessions, 'gemini'),
+            };
+          });
+        });
+      }).catch((error) => {
+        console.error('[WS] Error fetching updated sessions:', error);
+      });
+
+      return;
+    }
+
     if (latestMessage.type !== 'projects_updated') {
       return;
     }
@@ -261,35 +365,79 @@ export function useProjectsState({
       }
     }
 
+    if (projectsMessage.changedSessionIds?.length && selectedSession && selectedProject) {
+      if (projectsMessage.changedSessionIds.includes(selectedSession.id)) {
+        const isSessionActive = activeSessions.has(selectedSession.id);
+        console.log(
+          `[WS] Cursor session blob update detected: session=${selectedSession.id}, active=${isSessionActive}`,
+        );
+
+        if (!isSessionActive) {
+          setExternalMessageUpdate((prev) => prev + 1);
+        }
+      }
+    }
+
     setProjects((prevProjects) => {
       if (prevProjects.length === 0) {
         return updatedProjects;
       }
 
-      const prevTimestampsMap = new Map<string, Record<string, string>>();
+      // Build map of local session read states (session-level)
+      // This preserves local optimistic updates when server sends stale data
+      const prevSessionStates = new Map<string, { readAt?: string | null; readBlobOffset?: number | null }>();
       for (const p of prevProjects) {
-        if (p.readTimestamps && Object.keys(p.readTimestamps).length > 0) {
-          prevTimestampsMap.set(p.name, p.readTimestamps);
+        const allSessions = [
+          ...(p.sessions ?? []),
+          ...(p.cursorSessions ?? []),
+          ...(p.codexSessions ?? []),
+          ...(p.geminiSessions ?? []),
+        ];
+        for (const s of allSessions) {
+          const key = `${p.name}:${s.id}`;
+          if (s.readAt || s.readBlobOffset !== undefined) {
+            prevSessionStates.set(key, { readAt: s.readAt, readBlobOffset: s.readBlobOffset });
+          }
         }
       }
 
-      if (prevTimestampsMap.size === 0) {
+      if (prevSessionStates.size === 0) {
         return updatedProjects;
       }
 
-      return updatedProjects.map((project) => {
-        const localTimestamps = prevTimestampsMap.get(project.name);
-        if (!localTimestamps) {
-          return project;
-        }
-        const merged = { ...project.readTimestamps };
-        for (const [sid, ts] of Object.entries(localTimestamps)) {
-          if (!merged[sid] || new Date(ts) > new Date(merged[sid])) {
-            merged[sid] = ts;
+      // Helper to merge session read state
+      const mergeSessionReadState = (
+        projectName: string,
+        sessions: ProjectSession[] | undefined,
+      ): ProjectSession[] | undefined => {
+        if (!sessions) return sessions;
+        return sessions.map((s) => {
+          const key = `${projectName}:${s.id}`;
+          const prevState = prevSessionStates.get(key);
+          if (!prevState) return s;
+
+          let merged = s;
+          // Preserve local readAt if it's newer
+          if (prevState.readAt && (!s.readAt || new Date(prevState.readAt) > new Date(s.readAt))) {
+            merged = { ...merged, readAt: prevState.readAt };
           }
-        }
-        return { ...project, readTimestamps: merged };
-      });
+          // Preserve local readBlobOffset if it's higher
+          if (prevState.readBlobOffset !== undefined && prevState.readBlobOffset !== null) {
+            if (s.readBlobOffset === undefined || s.readBlobOffset === null || prevState.readBlobOffset > s.readBlobOffset) {
+              merged = { ...merged, readBlobOffset: prevState.readBlobOffset };
+            }
+          }
+          return merged;
+        });
+      };
+
+      return updatedProjects.map((project) => ({
+        ...project,
+        sessions: mergeSessionReadState(project.name, project.sessions),
+        cursorSessions: mergeSessionReadState(project.name, project.cursorSessions),
+        codexSessions: mergeSessionReadState(project.name, project.codexSessions),
+        geminiSessions: mergeSessionReadState(project.name, project.geminiSessions),
+      }));
     });
 
     if (!selectedProject) {
@@ -412,7 +560,7 @@ export function useProjectsState({
   );
 
   const markSessionAsRead = useCallback(
-    (projectName: string, sessionId: string) => {
+    (projectName: string, sessionId: string, provider?: SessionProvider, lastBlobOffset?: number) => {
       const key = `${projectName}:${sessionId}`;
       const now = Date.now();
       const last = lastReadMarkRef.current;
@@ -421,14 +569,48 @@ export function useProjectsState({
       }
       lastReadMarkRef.current = { key, time: now };
 
-      setProjects((prev) =>
-        prev.map((project) =>
-          project.name === projectName
-            ? { ...project, readTimestamps: { ...project.readTimestamps, [sessionId]: new Date(now).toISOString() } }
-            : project,
-        ),
-      );
-      void api.markSessionRead(projectName, sessionId, new Date(now).toISOString());
+      setProjects((prev) => {
+        let isCursorSession = provider === 'cursor';
+        let blobOffset = lastBlobOffset ?? 0;
+
+        const targetProject = prev.find((p) => p.name === projectName);
+        if (targetProject) {
+          const cursorSession = targetProject.cursorSessions?.find((s) => s.id === sessionId);
+          if (cursorSession) {
+            isCursorSession = true;
+            blobOffset = cursorSession.lastBlobOffset ?? blobOffset;
+          }
+        }
+
+        // Helper to update session in an array
+        const updateSessionInArray = (sessions: ProjectSession[] | undefined): ProjectSession[] | undefined => {
+          if (!sessions) return sessions;
+          return sessions.map((s) => {
+            if (s.id !== sessionId) return s;
+            if (isCursorSession) {
+              return { ...s, readBlobOffset: blobOffset };
+            }
+            return { ...s, readAt: new Date(now).toISOString() };
+          });
+        };
+
+        if (isCursorSession) {
+          void api.markSessionRead(projectName, sessionId, undefined, blobOffset);
+        } else {
+          void api.markSessionRead(projectName, sessionId, new Date(now).toISOString());
+        }
+
+        return prev.map((project) => {
+          if (project.name !== projectName) return project;
+          return {
+            ...project,
+            sessions: updateSessionInArray(project.sessions),
+            cursorSessions: updateSessionInArray(project.cursorSessions),
+            codexSessions: updateSessionInArray(project.codexSessions),
+            geminiSessions: updateSessionInArray(project.geminiSessions),
+          };
+        });
+      });
     },
     [],
   );
@@ -448,7 +630,7 @@ export function useProjectsState({
 
       const projectName = session.__projectName || selectedProject?.name;
       if (projectName) {
-        markSessionAsRead(projectName, session.id);
+        markSessionAsRead(projectName, session.id, session.__provider, session.lastBlobOffset as number | undefined);
       }
 
       if (isMobile) {

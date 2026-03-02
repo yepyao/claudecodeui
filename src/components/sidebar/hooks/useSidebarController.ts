@@ -72,7 +72,6 @@ export function useSidebarController({
   const [sessionDeleteConfirmation, setSessionDeleteConfirmation] = useState<SessionDeleteConfirmation | null>(null);
   const [showVersionModal, setShowVersionModal] = useState(false);
   const [starredProjects, setStarredProjects] = useState<Set<string>>(new Set());
-  const [starredSessions, setStarredSessions] = useState<Map<string, Set<string>>>(new Map());
   const starredInitialized = useRef(false);
 
   const isSidebarCollapsed = !isMobile && !sidebarVisible;
@@ -134,14 +133,10 @@ export function useSidebarController({
     starredInitialized.current = true;
 
     const newStarredProjects = new Set<string>();
-    const newStarredSessions = new Map<string, Set<string>>();
 
     for (const project of projects) {
       if (project.starred) {
         newStarredProjects.add(project.name);
-      }
-      if (project.starredSessions?.length) {
-        newStarredSessions.set(project.name, new Set(project.starredSessions));
       }
     }
 
@@ -163,7 +158,6 @@ export function useSidebarController({
     }
 
     setStarredProjects(newStarredProjects);
-    setStarredSessions(newStarredSessions);
   }, [projects]);
 
   useEffect(() => {
@@ -269,28 +263,33 @@ export function useSidebarController({
   );
 
   const toggleStarSession = useCallback((projectName: string, sessionId: string) => {
-    setStarredSessions((prev) => {
-      const next = new Map(prev);
-      const projectStarred = new Set(next.get(projectName) || []);
-      if (projectStarred.has(sessionId)) {
-        projectStarred.delete(sessionId);
-      } else {
-        projectStarred.add(sessionId);
-      }
-      next.set(projectName, projectStarred);
-      return next;
+    // Call API to toggle star status
+    // The session's starred field will be updated when projects refresh or via WS update
+    void api.starSession(projectName, sessionId).then(() => {
+      // Trigger a refresh to update the UI with the new starred status
+      void onRefresh();
     });
-    void api.starSession(projectName, sessionId);
-  }, []);
+  }, [onRefresh]);
 
   const isSessionStarred = useCallback(
-    (projectName: string, sessionId: string) => starredSessions.get(projectName)?.has(sessionId) ?? false,
-    [starredSessions],
+    (projectName: string, sessionId: string) => {
+      const project = projects.find((p) => p.name === projectName);
+      if (!project) return false;
+      const allSessions = [
+        ...(project.sessions ?? []),
+        ...(project.cursorSessions ?? []),
+        ...(project.codexSessions ?? []),
+        ...(project.geminiSessions ?? []),
+      ];
+      const session = allSessions.find((s) => s.id === sessionId);
+      return session?.starred ?? false;
+    },
+    [projects],
   );
 
   const getProjectSessions = useCallback(
-    (project: Project) => getAllSessions(project, additionalSessions, additionalCursorSessions, starredSessions),
-    [additionalSessions, additionalCursorSessions, starredSessions],
+    (project: Project) => getAllSessions(project, additionalSessions, additionalCursorSessions),
+    [additionalSessions, additionalCursorSessions],
   );
 
   const projectsWithSessionMeta = useMemo(
@@ -476,18 +475,15 @@ export function useSidebarController({
 
         // Load more Claude sessions
         if (claudeCanLoadMore) {
-          const projectStarredSet = starredSessions.get(project.name);
           const loadedClaude = [
             ...(project.sessions || []),
             ...(additionalSessions[project.name] || []),
           ];
-          const nonStarredOffset = projectStarredSet
-            ? loadedClaude.filter((s) => !projectStarredSet.has(s.id)).length
-            : loadedClaude.length;
+          // Count non-starred sessions for offset (starred sessions come from session.starred)
+          const nonStarredOffset = loadedClaude.filter((s) => !s.starred).length;
 
-          const projectStarredIds = [...(projectStarredSet || [])];
           loadPromises.push(
-            api.sessions(project.name, 5, nonStarredOffset, 'claude', projectStarredIds).then(async (response) => {
+            api.sessions(project.name, 5, nonStarredOffset, 'claude').then(async (response) => {
               if (!response.ok) return;
               const result = (await response.json()) as {
                 sessions?: ProjectSession[];
@@ -513,18 +509,15 @@ export function useSidebarController({
 
         // Load more Cursor sessions
         if (cursorCanLoadMore) {
-          const cursorStarredSet = starredSessions.get(project.name);
           const loadedCursor = [
             ...(project.cursorSessions || []),
             ...(additionalCursorSessions[project.name] || []),
           ];
-          const cursorNonStarredOffset = cursorStarredSet
-            ? loadedCursor.filter((s) => !cursorStarredSet.has(s.id)).length
-            : loadedCursor.length;
+          // Count non-starred sessions for offset (starred sessions come from session.starred)
+          const cursorNonStarredOffset = loadedCursor.filter((s) => !s.starred).length;
 
-          const cursorStarredIds = [...(cursorStarredSet || [])];
           loadPromises.push(
-            api.sessions(project.name, 5, cursorNonStarredOffset, 'cursor', cursorStarredIds).then(async (response) => {
+            api.sessions(project.name, 5, cursorNonStarredOffset, 'cursor').then(async (response) => {
               if (!response.ok) return;
               const result = (await response.json()) as {
                 sessions?: ProjectSession[];
@@ -555,7 +548,7 @@ export function useSidebarController({
         setLoadingSessions((prev) => ({ ...prev, [project.name]: false }));
       }
     },
-    [additionalSessions, additionalCursorSessions, loadingSessions, projectHasMoreOverrides, cursorHasMoreOverrides, starredSessions],
+    [additionalSessions, additionalCursorSessions, loadingSessions, projectHasMoreOverrides, cursorHasMoreOverrides],
   );
 
   const handleProjectSelect = useCallback(

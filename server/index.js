@@ -44,7 +44,8 @@ import pty from 'node-pty';
 import fetch from 'node-fetch';
 import mime from 'mime-types';
 
-import { getProjects, getClaudeSessions, getCursorSessions, getSessionMessages, renameProject, toggleStarProject, toggleStarSession, markSessionRead, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, extractCursorProjectPath, clearProjectDirectoryCache } from './projects.js';
+import { getProjects, getClaudeSessions, getCursorSessions, getSessionMessages, renameProject, toggleStarProject, toggleStarSession, markSessionRead, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, extractCursorProjectPath, clearProjectDirectoryCache, getClaudeSessionById, getCursorSessionById, getCodexSessionById, getGeminiSessionById, encodeCursorProjectName } from './projects.js';
+import { needsMigration, migrateSessionConfigs } from './session-config.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval } from './claude-sdk.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive, getActiveCodexSessions } from './openai-codex.js';
@@ -71,7 +72,6 @@ import { IS_PLATFORM } from './constants/config.js';
 // File system watchers for provider project/session folders
 const PROVIDER_WATCH_PATHS = [
     { provider: 'claude', rootPath: path.join(os.homedir(), '.claude', 'projects') },
-    { provider: 'cursor', rootPath: path.join(os.homedir(), '.cursor', 'chats') },
     { provider: 'codex', rootPath: path.join(os.homedir(), '.codex', 'sessions') },
     { provider: 'gemini', rootPath: path.join(os.homedir(), '.gemini', 'projects') },
     { provider: 'gemini_sessions', rootPath: path.join(os.homedir(), '.gemini', 'sessions') }
@@ -124,14 +124,64 @@ async function setupProjectsWatcher() {
     );
     projectsWatchers = [];
 
+    // Track pending changes to batch them together
+    let pendingChanges = new Map(); // projectName -> Set<sessionId>
+    
     const debouncedUpdate = (eventType, filePath, provider, rootPath) => {
         if (projectsWatcherDebounceTimer) {
             clearTimeout(projectsWatcherDebounceTimer);
         }
 
+        // Extract project and session info from path immediately
+        const changedFile = path.relative(rootPath, filePath).replace(/\\/g, '/');
+        const changedParts = changedFile.split('/');
+        
+        // Determine project name and session ID based on provider
+        let projectName = null;
+        let sessionId = null;
+        
+        if (provider === 'claude' && changedParts.length >= 2) {
+            // Claude: {projectName}/{sessionId}.jsonl
+            projectName = changedParts[0];
+            const fileName = changedParts[changedParts.length - 1];
+            sessionId = fileName.replace(/\.jsonl$/, '');
+        } else if (provider === 'codex' && changedParts.length >= 1) {
+            // Codex: can be nested, session ID is in the filename
+            const fileName = changedParts[changedParts.length - 1];
+            if (fileName.endsWith('.jsonl')) {
+                sessionId = path.basename(fileName, '.jsonl');
+                // Project name would need to be extracted from file content, skip for now
+                // Will use 'codex' as a generic project identifier
+                projectName = 'codex-sessions';
+            }
+        } else if (provider === 'gemini' && changedParts.length >= 1) {
+            // Gemini: {sessionId}.json
+            const fileName = changedParts[changedParts.length - 1];
+            if (fileName.endsWith('.json')) {
+                sessionId = path.basename(fileName, '.json');
+                projectName = 'gemini-sessions';
+            }
+        }
+        
+        // Track the change
+        if (projectName && sessionId) {
+            if (!pendingChanges.has(projectName)) {
+                pendingChanges.set(projectName, new Set());
+            }
+            pendingChanges.get(projectName).add(sessionId);
+        }
+
         projectsWatcherDebounceTimer = setTimeout(async () => {
             // Prevent reentrant calls
             if (isGetProjectsRunning) {
+                return;
+            }
+            
+            // Capture and clear pending changes
+            const changes = pendingChanges;
+            pendingChanges = new Map();
+            
+            if (changes.size === 0) {
                 return;
             }
 
@@ -141,37 +191,21 @@ async function setupProjectsWatcher() {
                 // Clear project directory cache when files change
                 clearProjectDirectoryCache();
 
-                // Get updated projects list (no progress broadcast for watcher-triggered refreshes)
-                const updatedProjects = await getProjects();
-
-                const changedFile = path.relative(rootPath, filePath).replace(/\\/g, '/');
-                const changedParts = changedFile.split('/');
-
-                const allSessionIds = new Set();
-                for (const p of updatedProjects) {
-                    for (const s of (p.sessions || [])) allSessionIds.add(s.id);
-                    for (const s of (p.cursorSessions || [])) allSessionIds.add(s.id);
-                    for (const s of (p.codexSessions || [])) allSessionIds.add(s.id);
-                    for (const s of (p.geminiSessions || [])) allSessionIds.add(s.id);
+                // Build lightweight sessions_updated message
+                const updates = {};
+                for (const [pName, sessionIds] of changes) {
+                    updates[pName] = {
+                        sessionIds: [...sessionIds],
+                        provider: provider
+                    };
                 }
 
-                const matchesKnownSession = changedParts.some(part => {
-                    if (allSessionIds.has(part)) return true;
-                    const withoutExt = part.replace(/\.jsonl$/, '');
-                    return withoutExt !== part && allSessionIds.has(withoutExt);
-                });
-
-                if (!matchesKnownSession) {
-                    return;
-                }
-
-                // Notify all connected clients about the project changes
+                // Notify all connected clients with lightweight message
                 const updateMessage = JSON.stringify({
-                    type: 'projects_updated',
-                    projects: updatedProjects,
+                    type: 'sessions_updated',
+                    updates,
                     timestamp: new Date().toISOString(),
                     changeType: eventType,
-                    changedFile,
                     watchProvider: provider
                 });
 
@@ -230,6 +264,153 @@ async function setupProjectsWatcher() {
     if (projectsWatchers.length === 0) {
         console.error('[ERROR] Failed to setup any provider watchers');
     }
+}
+
+// Cursor polling loop: detect blob count changes every 30s instead of chokidar
+const CURSOR_POLL_INTERVAL_MS = 30_000;
+const cursorBlobCache = new Map(); // `${projectHash}:${sessionId}` -> lastBlobOffset
+let isCursorPollingRunning = false;
+
+async function buildCursorHashToProjectNameMap() {
+    const crypto = await import('crypto');
+    const cursorProjectsDir = path.join(os.homedir(), '.cursor', 'projects');
+    const hashToName = new Map(); // MD5 hash -> canonical project name (Claude format with leading dash)
+    
+    try {
+        const entries = await fs.promises.readdir(cursorProjectsDir, { withFileTypes: true });
+        for (const entry of entries) {
+            if (!entry.isDirectory() || entry.name.startsWith('tmp-')) continue;
+            const cursorName = entry.name;
+            const canonicalName = '-' + cursorName;  // Claude format with leading dash
+            
+            // Read the actual project path from .workspace-trusted file (JSON format)
+            const trustedFilePath = path.join(cursorProjectsDir, cursorName, '.workspace-trusted');
+            try {
+                const trustedContent = await fs.promises.readFile(trustedFilePath, 'utf8');
+                const trustedData = JSON.parse(trustedContent);
+                const projectPath = trustedData.workspacePath;
+                if (projectPath) {
+                    const hash = crypto.createHash('md5').update(projectPath).digest('hex');
+                    hashToName.set(hash, canonicalName);
+                }
+            } catch {
+                // Fallback: try decoding folder name (less reliable for paths with dashes)
+                const projectPath = '/' + cursorName.replace(/-/g, '/');
+                const hash = crypto.createHash('md5').update(projectPath).digest('hex');
+                hashToName.set(hash, canonicalName);
+            }
+        }
+    } catch (error) {
+        if (error.code !== 'ENOENT') {
+            console.error('[ERROR] Failed to scan Cursor projects directory:', error);
+        }
+    }
+    
+    return hashToName;
+}
+
+async function scanAllCursorSessions() {
+    const sqlite3Module = await import('sqlite3');
+    const { open: openDb } = await import('sqlite');
+    const chatsDir = path.join(os.homedir(), '.cursor', 'chats');
+    const updates = {}; // projectName -> { sessionIds: [], provider: 'cursor' }
+    
+    // Build mapping from hash to project name
+    const hashToProjectName = await buildCursorHashToProjectNameMap();
+    
+    try {
+        const projectDirs = await fs.promises.readdir(chatsDir, { withFileTypes: true });
+        
+        for (const projectDir of projectDirs) {
+            if (!projectDir.isDirectory()) continue;
+            const projectHash = projectDir.name;
+            const projectChatsPath = path.join(chatsDir, projectHash);
+            
+            // Get the project name from the hash mapping
+            const projectName = hashToProjectName.get(projectHash);
+            if (!projectName) {
+                // Unknown project (not in ~/.cursor/projects/), skip
+                continue;
+            }
+            
+            try {
+                const sessionDirs = await fs.promises.readdir(projectChatsPath, { withFileTypes: true });
+                const changedSessionIds = [];
+                
+                for (const sessionDir of sessionDirs) {
+                    if (!sessionDir.isDirectory() || sessionDir.name.startsWith('.')) continue;
+                    const sessionId = sessionDir.name;
+                    const dbPath = path.join(projectChatsPath, sessionId, 'store.db');
+                    
+                    try {
+                        const db = await openDb({
+                            filename: dbPath,
+                            driver: sqlite3Module.default.Database,
+                            mode: sqlite3Module.default.OPEN_READONLY
+                        });
+                        
+                        const blobCount = await db.get('SELECT COUNT(*) as count FROM blobs');
+                        await db.close();
+                        
+                        const cacheKey = `${projectHash}:${sessionId}`;
+                        const lastBlobOffset = blobCount?.count || 0;
+                        const cached = cursorBlobCache.get(cacheKey);
+                        
+                        if (cached !== undefined && cached !== lastBlobOffset) {
+                            changedSessionIds.push(sessionId);
+                        }
+                        cursorBlobCache.set(cacheKey, lastBlobOffset);
+                    } catch {
+                        // Skip sessions we can't read
+                    }
+                }
+                
+                if (changedSessionIds.length > 0) {
+                    updates[projectName] = { sessionIds: changedSessionIds, provider: 'cursor' };
+                }
+            } catch {
+                // Skip project dirs we can't read
+            }
+        }
+    } catch (error) {
+        if (error.code !== 'ENOENT') {
+            console.error('[ERROR] Failed to scan Cursor chats directory:', error);
+        }
+    }
+    
+    return updates;
+}
+
+function setupCursorPollingLoop() {
+    setInterval(async () => {
+        if (isCursorPollingRunning || connectedClients.size === 0) return;
+
+        try {
+            isCursorPollingRunning = true;
+            
+            const updates = await scanAllCursorSessions();
+            
+            if (Object.keys(updates).length === 0) return;
+
+            // Send lightweight sessions_updated message
+            const updateMessage = JSON.stringify({
+                type: 'sessions_updated',
+                updates,
+                timestamp: new Date().toISOString(),
+                watchProvider: 'cursor'
+            });
+
+            connectedClients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(updateMessage);
+                }
+            });
+        } catch (error) {
+            console.error('[ERROR] Cursor polling error:', error);
+        } finally {
+            isCursorPollingRunning = false;
+        }
+    }, CURSOR_POLL_INTERVAL_MS);
 }
 
 
@@ -516,9 +697,10 @@ app.get('/api/projects/:projectName/sessions', authenticateToken, async (req, re
         const starredIds = starred ? starred.split(',').filter(Boolean) : [];
         
         if (provider === 'cursor') {
-            // For Cursor sessions, use extractCursorProjectPath (reads .workspace-trusted)
-            // Fall back to extractProjectDirectory for projects that only exist in Claude
-            const projectPath = await extractCursorProjectPath(req.params.projectName).catch(() => null)
+            // The URL param uses Claude-style encoding (leading dash for root /),
+            // but Cursor folders omit the leading dash. Try both variants.
+            const cursorName = req.params.projectName.replace(/^-/, '');
+            const projectPath = await extractCursorProjectPath(cursorName).catch(() => null)
                 || await extractProjectDirectory(req.params.projectName).catch(() => null);
             if (!projectPath) {
                 return res.json({ sessions: [], hasMore: false, total: 0 });
@@ -530,6 +712,59 @@ app.get('/api/projects/:projectName/sessions', authenticateToken, async (req, re
             const result = await getClaudeSessions(req.params.projectName, parseInt(limit), parseInt(offset), starredIds);
             res.json(result);
         }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Batch fetch sessions by ID
+// Request body: { requests: [{ projectName, sessionId, provider }] }
+// Response: { results: [{ projectName, sessionId, provider, session, error? }] }
+app.post('/api/sessions/batch', authenticateToken, async (req, res) => {
+    try {
+        const { requests } = req.body;
+        if (!Array.isArray(requests)) {
+            return res.status(400).json({ error: 'requests must be an array' });
+        }
+
+        const results = await Promise.all(requests.map(async (request) => {
+            const { projectName, sessionId, provider } = request;
+            if (!projectName || !sessionId || !provider) {
+                return { projectName, sessionId, provider, session: null, error: 'Missing required fields' };
+            }
+
+            try {
+                let session = null;
+                
+                if (provider === 'claude') {
+                    session = await getClaudeSessionById(projectName, sessionId);
+                } else if (provider === 'cursor') {
+                    // Convert project name to path for Cursor
+                    const cursorName = projectName.replace(/^-/, '');
+                    const projectPath = await extractCursorProjectPath(cursorName).catch(() => null)
+                        || await extractProjectDirectory(projectName).catch(() => null);
+                    if (projectPath) {
+                        session = await getCursorSessionById(projectPath, sessionId);
+                    }
+                } else if (provider === 'codex') {
+                    const projectPath = await extractProjectDirectory(projectName).catch(() => null);
+                    if (projectPath) {
+                        session = await getCodexSessionById(projectPath, sessionId);
+                    }
+                } else if (provider === 'gemini') {
+                    const projectPath = await extractProjectDirectory(projectName).catch(() => null);
+                    if (projectPath) {
+                        session = await getGeminiSessionById(projectPath, sessionId);
+                    }
+                }
+
+                return { projectName, sessionId, provider, session };
+            } catch (error) {
+                return { projectName, sessionId, provider, session: null, error: error.message };
+            }
+        }));
+
+        res.json({ results });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -594,8 +829,8 @@ app.put('/api/projects/:projectName/sessions/:sessionId/star', authenticateToken
 // Mark session as read
 app.put('/api/projects/:projectName/sessions/:sessionId/read', authenticateToken, async (req, res) => {
     try {
-        const readAt = await markSessionRead(req.params.projectName, req.params.sessionId, req.body?.readAt);
-        res.json({ success: true, readAt });
+        const result = await markSessionRead(req.params.projectName, req.params.sessionId, req.body?.readAt, req.body?.readBlobOffset);
+        res.json({ success: true, ...result });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -2046,6 +2281,17 @@ async function startServer() {
         // Initialize authentication database
         await initializeDatabase();
 
+        // Migrate session configs from project-level to session-level if needed
+        try {
+            if (await needsMigration()) {
+                console.log('[INFO] Migrating session configs to new format...');
+                const result = await migrateSessionConfigs();
+                console.log(`[INFO] Migration complete: ${result.count} session configs migrated`);
+            }
+        } catch (migrationError) {
+            console.warn('[WARN] Session config migration failed:', migrationError.message);
+        }
+
         // Check if running in production mode (dist folder exists)
         const distIndexPath = path.join(__dirname, '../dist/index.html');
         const isProduction = fs.existsSync(distIndexPath);
@@ -2073,6 +2319,7 @@ async function startServer() {
 
             // Start watching the projects folder for changes
             await setupProjectsWatcher();
+            setupCursorPollingLoop();
         });
     } catch (error) {
         console.error('[ERROR] Failed to start server:', error);

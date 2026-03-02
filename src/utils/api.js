@@ -53,6 +53,14 @@ export const api = {
     }
     return authenticatedFetch(`/api/projects/${projectName}/sessions?${params.toString()}`);
   },
+  
+  // Batch fetch sessions by ID
+  // requests: [{ projectName, sessionId, provider }]
+  fetchSessionsBatch: (requests) =>
+    authenticatedFetch('/api/sessions/batch', {
+      method: 'POST',
+      body: JSON.stringify({ requests }),
+    }),
   sessionMessages: (projectName, sessionId, limit = null, offset = 0, provider = 'claude') => {
     const params = new URLSearchParams();
     if (limit !== null) {
@@ -86,11 +94,11 @@ export const api = {
     authenticatedFetch(`/api/projects/${projectName}/sessions/${sessionId}/star`, {
       method: 'PUT',
     }),
-  markSessionRead: (projectName, sessionId, readAt) =>
+  markSessionRead: (projectName, sessionId, readAt, readBlobOffset) =>
     authenticatedFetch(`/api/projects/${projectName}/sessions/${sessionId}/read`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ readAt }),
+      body: JSON.stringify({ readAt, readBlobOffset }),
     }),
   deleteSession: (projectName, sessionId) =>
     authenticatedFetch(`/api/projects/${projectName}/sessions/${sessionId}`, {
@@ -102,6 +110,10 @@ export const api = {
     }),
   deleteGeminiSession: (sessionId) =>
     authenticatedFetch(`/api/gemini/sessions/${sessionId}`, {
+      method: 'DELETE',
+    }),
+  deleteCursorSession: (sessionId) =>
+    authenticatedFetch(`/api/cursor/sessions/${sessionId}`, {
       method: 'DELETE',
     }),
   deleteProject: (projectName, force = false) =>

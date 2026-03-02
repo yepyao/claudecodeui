@@ -403,7 +403,8 @@ router.get('/sessions', async (req, res) => {
           mode: null,
           projectPath: projectPath,
           lastMessage: null,
-          messageCount: 0
+          messageCount: 0,
+          lastBlobOffset: 0
         };
         
         // Parse meta table entries
@@ -462,6 +463,7 @@ router.get('/sessions', async (req, res) => {
             WHERE substr(data, 1, 1) = X'7B'
           `);
           sessionData.messageCount = blobCount.count;
+          sessionData.lastBlobOffset = blobCount.count;
           
           // Get the most recent JSON blob for preview (actual message, not DAG structure)
           const lastBlob = await db.get(`

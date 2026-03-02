@@ -12,6 +12,10 @@ export interface ProjectSession {
   updated_at?: string;
   lastActivity?: string;
   messageCount?: number;
+  lastBlobOffset?: number;
+  starred?: boolean;
+  readAt?: string | null;
+  readBlobOffset?: number | null;
   __provider?: SessionProvider;
   __projectName?: string;
   [key: string]: unknown;
@@ -31,13 +35,12 @@ export interface ProjectTaskmasterInfo {
 }
 
 export interface Project {
-  name: string;
+  name: string;                       // Canonical name (Claude format: -foo-bar)
+  cursorName?: string;                // Cursor format name (foo-bar) for internal lookups
   displayName: string;
   fullPath: string;
   path?: string;
   starred?: boolean;
-  starredSessions?: string[];
-  readTimestamps?: Record<string, string>;
   sessions?: ProjectSession[];
   cursorSessions?: ProjectSession[];
   codexSessions?: ProjectSession[];
@@ -61,7 +64,34 @@ export interface ProjectsUpdatedMessage {
   type: 'projects_updated';
   projects: Project[];
   changedFile?: string;
+  changedSessionIds?: string[];
   [key: string]: unknown;
+}
+
+export interface SessionUpdateInfo {
+  sessionIds: string[];
+  provider: SessionProvider;
+}
+
+export interface SessionsUpdatedMessage {
+  type: 'sessions_updated';
+  updates: Record<string, SessionUpdateInfo>;
+  timestamp?: string;
+  [key: string]: unknown;
+}
+
+export interface BatchSessionRequest {
+  projectName: string;
+  sessionId: string;
+  provider: SessionProvider;
+}
+
+export interface BatchSessionResponse {
+  projectName: string;
+  sessionId: string;
+  provider: SessionProvider;
+  session: ProjectSession | null;
+  error?: string;
 }
 
 export interface LoadingProgressMessage extends LoadingProgress {
@@ -71,4 +101,5 @@ export interface LoadingProgressMessage extends LoadingProgress {
 export type AppSocketMessage =
   | LoadingProgressMessage
   | ProjectsUpdatedMessage
+  | SessionsUpdatedMessage
   | { type?: string;[key: string]: unknown };

@@ -13,7 +13,6 @@ type SidebarProjectSessionsProps = {
   initialSessionsLoaded: boolean;
   isLoadingSessions: boolean;
   currentTime: Date;
-  readTimestamps: Record<string, string>;
   editingSession: string | null;
   editingSessionName: string;
   onEditingSessionNameChange: (value: string) => void;
@@ -62,7 +61,6 @@ export default function SidebarProjectSessions({
   initialSessionsLoaded,
   isLoadingSessions,
   currentTime,
-  readTimestamps,
   editingSession,
   editingSessionName,
   onEditingSessionNameChange,
@@ -103,7 +101,6 @@ export default function SidebarProjectSessions({
             isStarred={isSessionStarred(project.name, session.id)}
             selectedSession={selectedSession}
             currentTime={currentTime}
-            readTimestamps={readTimestamps}
             editingSession={editingSession}
             editingSessionName={editingSessionName}
             onEditingSessionNameChange={onEditingSessionNameChange}
