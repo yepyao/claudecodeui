@@ -115,7 +115,13 @@ export const getAllSessions = (
   }));
 
   const projectStarred = starredSessions.get(project.name);
-  const allSessions = [...claudeSessions, ...cursorSessions, ...codexSessions, ...geminiSessions];
+  const seen = new Set<string>();
+  const allSessions = [...claudeSessions, ...cursorSessions, ...codexSessions, ...geminiSessions]
+    .filter((session) => {
+      if (seen.has(session.id)) return false;
+      seen.add(session.id);
+      return true;
+    });
 
   return allSessions.sort((a, b) => {
     const aStarred = projectStarred?.has(a.id) ?? false;
