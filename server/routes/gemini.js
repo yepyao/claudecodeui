@@ -12,14 +12,14 @@ router.get('/sessions/:sessionId/messages', async (req, res) => {
         }
 
         const messages = sessionManager.getSessionMessages(sessionId);
+        const total = messages.length;
 
         res.json({
             success: true,
             messages: messages,
-            total: messages.length,
-            hasMore: false,
-            offset: 0,
-            limit: messages.length
+            total,
+            offsetBegin: total > 0 ? 0 : -1,
+            offsetEnd: total > 0 ? total - 1 : -1,
         });
     } catch (error) {
         console.error('Error fetching Gemini session messages:', error);

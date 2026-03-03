@@ -1084,24 +1084,51 @@ async function parseAgentTools(filePath) {
 }
 
 // Get messages for a specific session with pagination support
-async function getSessionMessages(projectName, sessionId, limit = null, offset = 0) {
+// Paginate a sorted message array using 0-based inclusive offsets.
+// - No params: returns last `limit` messages
+// - offsetEnd: returns `limit` messages ending at offsetEnd (inclusive) — for loading history
+// - offsetBegin: returns all messages from offsetBegin (inclusive) onward — for external updates
+function paginateMessages(sortedMessages, { limit = 50, offsetBegin, offsetEnd } = {}) {
+  const total = sortedMessages.length;
+  if (total === 0) {
+    return { messages: [], total: 0, offsetBegin: -1, offsetEnd: -1 };
+  }
+
+  let begin, end;
+
+  if (offsetEnd !== undefined) {
+    end = Math.min(offsetEnd, total - 1);
+    begin = Math.max(0, end - limit + 1);
+  } else if (offsetBegin !== undefined) {
+    begin = Math.max(0, offsetBegin);
+    end = total - 1;
+    if (begin > end) {
+      return { messages: [], total, offsetBegin: -1, offsetEnd: -1 };
+    }
+  } else {
+    end = total - 1;
+    begin = Math.max(0, total - limit);
+  }
+
+  const messages = sortedMessages.slice(begin, end + 1);
+  return { messages, total, offsetBegin: begin, offsetEnd: end };
+}
+
+async function getSessionMessages(projectName, sessionId, { limit = 20, offsetBegin, offsetEnd } = {}) {
   const projectDir = path.join(os.homedir(), '.claude', 'projects', projectName);
 
   try {
     const files = await fs.readdir(projectDir);
-    // agent-*.jsonl files contain subagent tool history - we'll process them separately
     const jsonlFiles = files.filter(file => file.endsWith('.jsonl') && !file.startsWith('agent-'));
     const agentFiles = files.filter(file => file.endsWith('.jsonl') && file.startsWith('agent-'));
 
     if (jsonlFiles.length === 0) {
-      return { messages: [], total: 0, hasMore: false };
+      return { messages: [], total: 0, offsetBegin: -1, offsetEnd: -1 };
     }
 
     const messages = [];
-    // Map of agentId -> tools for subagent tool grouping
     const agentToolsCache = new Map();
 
-    // Process all JSONL files to find messages for this session
     for (const file of jsonlFiles) {
       const jsonlFile = path.join(projectDir, file);
       const fileStream = fsSync.createReadStream(jsonlFile);
@@ -1124,7 +1151,6 @@ async function getSessionMessages(projectName, sessionId, limit = null, offset =
       }
     }
 
-    // Collect agentIds from Task tool results
     const agentIds = new Set();
     for (const message of messages) {
       if (message.toolUseResult?.agentId) {
@@ -1132,7 +1158,6 @@ async function getSessionMessages(projectName, sessionId, limit = null, offset =
       }
     }
 
-    // Load agent tools for each agentId found
     for (const agentId of agentIds) {
       const agentFileName = `agent-${agentId}.jsonl`;
       if (agentFiles.includes(agentFileName)) {
@@ -1142,7 +1167,6 @@ async function getSessionMessages(projectName, sessionId, limit = null, offset =
       }
     }
 
-    // Attach agent tools to their parent Task messages
     for (const message of messages) {
       if (message.toolUseResult?.agentId) {
         const agentId = message.toolUseResult.agentId;
@@ -1152,35 +1176,15 @@ async function getSessionMessages(projectName, sessionId, limit = null, offset =
         }
       }
     }
-    // Sort messages by timestamp
+
     const sortedMessages = messages.sort((a, b) =>
       new Date(a.timestamp || 0) - new Date(b.timestamp || 0)
     );
 
-    const total = sortedMessages.length;
-
-    // If no limit is specified, return all messages (backward compatibility)
-    if (limit === null) {
-      return sortedMessages;
-    }
-
-    // Apply pagination - for recent messages, we need to slice from the end
-    // offset 0 should give us the most recent messages
-    const startIndex = Math.max(0, total - offset - limit);
-    const endIndex = total - offset;
-    const paginatedMessages = sortedMessages.slice(startIndex, endIndex);
-    const hasMore = startIndex > 0;
-
-    return {
-      messages: paginatedMessages,
-      total,
-      hasMore,
-      offset,
-      limit
-    };
+    return paginateMessages(sortedMessages, { limit, offsetBegin, offsetEnd });
   } catch (error) {
     console.error(`Error reading messages for session ${sessionId}:`, error);
-    return limit === null ? [] : { messages: [], total: 0, hasMore: false };
+    return { messages: [], total: 0, offsetBegin: -1, offsetEnd: -1 };
   }
 }
 
@@ -1516,7 +1520,7 @@ async function getCursorSessions(projectPath, limit = 5, offset = 0, starredSess
           });
 
           const metaRow = await db.get("SELECT value FROM meta WHERE key = '0'");
-          const blobCount = await db.get('SELECT COUNT(*) as count FROM blobs');
+          const blobCount = await db.get("SELECT COUNT(*) as count FROM blobs WHERE substr(data, 1, 1) = X'7B'");
           await db.close();
 
           if (metaRow?.value) {
@@ -1802,11 +1806,10 @@ async function parseCodexSessionFile(filePath) {
 }
 
 // Get messages for a specific Codex session
-async function getCodexSessionMessages(sessionId, limit = null, offset = 0) {
+async function getCodexSessionMessages(sessionId, { limit = 20, offsetBegin, offsetEnd } = {}) {
   try {
     const codexSessionsDir = path.join(os.homedir(), '.codex', 'sessions');
 
-    // Find the session file by searching for the session ID
     const findSessionFile = async (dir) => {
       try {
         const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -1829,7 +1832,7 @@ async function getCodexSessionMessages(sessionId, limit = null, offset = 0) {
 
     if (!sessionFilePath) {
       console.warn(`Codex session file not found for session ${sessionId}`);
-      return { messages: [], total: 0, hasMore: false };
+      return { messages: [], total: 0, offsetBegin: -1, offsetEnd: -1 };
     }
 
     const messages = [];
@@ -2006,33 +2009,14 @@ async function getCodexSessionMessages(sessionId, limit = null, offset = 0) {
       }
     }
 
-    // Sort by timestamp
     messages.sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0));
 
-    const total = messages.length;
-
-    // Apply pagination if limit is specified
-    if (limit !== null) {
-      const startIndex = Math.max(0, total - offset - limit);
-      const endIndex = total - offset;
-      const paginatedMessages = messages.slice(startIndex, endIndex);
-      const hasMore = startIndex > 0;
-
-      return {
-        messages: paginatedMessages,
-        total,
-        hasMore,
-        offset,
-        limit,
-        tokenUsage
-      };
-    }
-
-    return { messages, tokenUsage };
+    const result = paginateMessages(messages, { limit, offsetBegin, offsetEnd });
+    return { ...result, tokenUsage };
 
   } catch (error) {
     console.error(`Error reading Codex session messages for ${sessionId}:`, error);
-    return { messages: [], total: 0, hasMore: false };
+    return { messages: [], total: 0, offsetBegin: -1, offsetEnd: -1 };
   }
 }
 
@@ -2105,7 +2089,7 @@ async function getCursorSessionById(projectPath, sessionId) {
     });
     
     const metaRow = await db.get("SELECT value FROM meta WHERE key = '0'");
-    const blobCount = await db.get('SELECT COUNT(*) as count FROM blobs');
+    const blobCount = await db.get("SELECT COUNT(*) as count FROM blobs WHERE substr(data, 1, 1) = X'7B'");
     await db.close();
     
     if (!metaRow?.value) return null;
@@ -2213,6 +2197,7 @@ export {
   getClaudeSessions,
   getCursorSessions,
   getSessionMessages,
+  paginateMessages,
   renameProject,
   toggleStarProject,
   toggleStarSession,

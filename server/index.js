@@ -349,7 +349,7 @@ async function scanAllCursorSessions() {
                             mode: sqlite3Module.default.OPEN_READONLY
                         });
                         
-                        const blobCount = await db.get('SELECT COUNT(*) as count FROM blobs');
+                        const blobCount = await db.get("SELECT COUNT(*) as count FROM blobs WHERE substr(data, 1, 1) = X'7B'");
                         await db.close();
                         
                         const cacheKey = `${projectHash}:${sessionId}`;
@@ -774,22 +774,15 @@ app.post('/api/sessions/batch', authenticateToken, async (req, res) => {
 app.get('/api/projects/:projectName/sessions/:sessionId/messages', authenticateToken, async (req, res) => {
     try {
         const { projectName, sessionId } = req.params;
-        const { limit, offset } = req.query;
+        const { limit, offsetBegin, offsetEnd } = req.query;
 
-        // Parse limit and offset if provided
-        const parsedLimit = limit ? parseInt(limit, 10) : null;
-        const parsedOffset = offset ? parseInt(offset, 10) : 0;
+        const opts = {};
+        if (limit !== undefined) opts.limit = parseInt(limit, 10);
+        if (offsetBegin !== undefined) opts.offsetBegin = parseInt(offsetBegin, 10);
+        if (offsetEnd !== undefined) opts.offsetEnd = parseInt(offsetEnd, 10);
 
-        const result = await getSessionMessages(projectName, sessionId, parsedLimit, parsedOffset);
-
-        // Handle both old and new response formats
-        if (Array.isArray(result)) {
-            // Backward compatibility: no pagination parameters were provided
-            res.json({ messages: result });
-        } else {
-            // New format with pagination info
-            res.json(result);
-        }
+        const result = await getSessionMessages(projectName, sessionId, opts);
+        res.json(result);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

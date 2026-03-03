@@ -61,25 +61,25 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ requests }),
     }),
-  sessionMessages: (projectName, sessionId, limit = null, offset = 0, provider = 'claude') => {
+  sessionMessages: (projectName, sessionId, { limit, offsetBegin, offsetEnd } = {}, provider = 'claude') => {
     const params = new URLSearchParams();
-    if (limit !== null) {
-      params.append('limit', limit);
-      params.append('offset', offset);
-    }
-    const queryString = params.toString();
+    if (limit !== undefined) params.append('limit', String(limit));
+    if (offsetBegin !== undefined) params.append('offsetBegin', String(offsetBegin));
+    if (offsetEnd !== undefined) params.append('offsetEnd', String(offsetEnd));
 
     let url;
     if (provider === 'codex') {
-      url = `/api/codex/sessions/${sessionId}/messages${queryString ? `?${queryString}` : ''}`;
+      url = `/api/codex/sessions/${sessionId}/messages`;
     } else if (provider === 'cursor') {
-      url = `/api/cursor/sessions/${sessionId}/messages${queryString ? `?${queryString}` : ''}`;
+      params.append('projectName', projectName);
+      url = `/api/cursor/sessions/${sessionId}/messages`;
     } else if (provider === 'gemini') {
-      url = `/api/gemini/sessions/${sessionId}/messages${queryString ? `?${queryString}` : ''}`;
+      url = `/api/gemini/sessions/${sessionId}/messages`;
     } else {
-      url = `/api/projects/${projectName}/sessions/${sessionId}/messages${queryString ? `?${queryString}` : ''}`;
+      url = `/api/projects/${projectName}/sessions/${sessionId}/messages`;
     }
-    return authenticatedFetch(url);
+    const queryString = params.toString();
+    return authenticatedFetch(queryString ? `${url}?${queryString}` : url);
   },
   renameProject: (projectName, displayName) =>
     authenticatedFetch(`/api/projects/${projectName}/rename`, {

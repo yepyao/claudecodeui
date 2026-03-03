@@ -12,7 +12,7 @@ import {
   type DiffCalculator,
 } from '../utils/messageTransforms';
 
-const MESSAGES_PER_PAGE = 20;
+const MESSAGES_PER_PAGE = 50;
 const INITIAL_VISIBLE_MESSAGES = 100;
 
 type PendingViewSession = {
@@ -71,7 +71,6 @@ export function useChatSessionState({
   const [sessionMessages, setSessionMessages] = useState<any[]>([]);
   const [isLoadingSessionMessages, setIsLoadingSessionMessages] = useState(false);
   const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false);
-  const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [totalMessages, setTotalMessages] = useState(0);
   const [isSystemSessionChange, setIsSystemSessionChange] = useState(false);
   const [canAbortSession, setCanAbortSession] = useState(false);
@@ -101,7 +100,8 @@ export function useChatSessionState({
   const topLoadLockRef = useRef(false);
   const pendingScrollRestoreRef = useRef<ScrollRestoreState | null>(null);
   const pendingInitialScrollRef = useRef(true);
-  const messagesOffsetRef = useRef(0);
+  const offsetBeginRef = useRef(-1);
+  const offsetEndRef = useRef(-1);
   const scrollPositionRef = useRef({ height: 0, top: 0 });
   const loadAllFinishedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadAllOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -109,25 +109,37 @@ export function useChatSessionState({
   const createDiff = useMemo<DiffCalculator>(() => createCachedDiffCalculator(), []);
 
   const loadSessionMessages = useCallback(
-    async (projectName: string, sessionId: string, loadMore = false, provider: Provider | string = 'claude') => {
+    async (
+      projectName: string,
+      sessionId: string,
+      mode: 'initial' | 'history' | 'external' = 'initial',
+      provider: Provider | string = 'claude',
+    ) => {
       if (!projectName || !sessionId) {
         return [] as any[];
       }
 
-      const isInitialLoad = !loadMore;
+      const isInitialLoad = mode === 'initial';
       if (isInitialLoad) {
         setIsLoadingSessionMessages(true);
-      } else {
+      } else if (mode === 'history') {
         setIsLoadingMoreMessages(true);
       }
 
       try {
-        const currentOffset = loadMore ? messagesOffsetRef.current : 0;
+        const opts: Record<string, number> = { limit: MESSAGES_PER_PAGE };
+
+        if (mode === 'history' && offsetBeginRef.current > 0) {
+          opts.offsetEnd = offsetBeginRef.current - 1;
+        } else if (mode === 'external' && offsetEndRef.current >= 0) {
+          delete opts.limit;
+          opts.offsetBegin = offsetEndRef.current + 1;
+        }
+
         const response = await (api.sessionMessages as any)(
           projectName,
           sessionId,
-          MESSAGES_PER_PAGE,
-          currentOffset,
+          opts,
           provider,
         );
         if (!response.ok) {
@@ -139,18 +151,20 @@ export function useChatSessionState({
           setTokenBudget(data.tokenUsage);
         }
 
-        if (data.hasMore !== undefined) {
-          const loadedCount = data.messages?.length || 0;
-          setHasMoreMessages(Boolean(data.hasMore));
-          setTotalMessages(Number(data.total || 0));
-          messagesOffsetRef.current = currentOffset + loadedCount;
-          return data.messages || [];
+        const messages = data.messages || [];
+        setTotalMessages(Number(data.total || 0));
+
+        if (data.offsetBegin >= 0 && data.offsetEnd >= 0 && messages.length > 0) {
+          if (mode === 'history') {
+            offsetBeginRef.current = data.offsetBegin;
+          } else if (mode === 'external') {
+            offsetEndRef.current = data.offsetEnd;
+          } else {
+            offsetBeginRef.current = data.offsetBegin;
+            offsetEndRef.current = data.offsetEnd;
+          }
         }
 
-        const messages = data.messages || [];
-        setHasMoreMessages(false);
-        setTotalMessages(messages.length);
-        messagesOffsetRef.current = messages.length;
         return messages;
       } catch (error) {
         console.error('Error loading session messages:', error);
@@ -158,7 +172,7 @@ export function useChatSessionState({
       } finally {
         if (isInitialLoad) {
           setIsLoadingSessionMessages(false);
-        } else {
+        } else if (mode === 'history') {
           setIsLoadingMoreMessages(false);
         }
       }
@@ -166,33 +180,12 @@ export function useChatSessionState({
     [],
   );
 
-  const loadCursorSessionMessages = useCallback(async (projectPath: string, sessionId: string) => {
-    if (!projectPath || !sessionId) {
-      return [] as ChatMessage[];
-    }
-
-    setIsLoadingSessionMessages(true);
-    try {
-      const url = `/api/cursor/sessions/${encodeURIComponent(sessionId)}?projectPath=${encodeURIComponent(projectPath)}`;
-      const response = await authenticatedFetch(url);
-      if (!response.ok) {
-        return [];
-      }
-
-      const data = await response.json();
-      const blobs = (data?.session?.messages || []) as any[];
-      return convertCursorSessionMessages(blobs, projectPath);
-    } catch (error) {
-      console.error('Error loading Cursor session messages:', error);
-      return [];
-    } finally {
-      setIsLoadingSessionMessages(false);
-    }
-  }, []);
-
   const convertedMessages = useMemo(() => {
+    if (sessionProvider === 'cursor') {
+      return convertCursorSessionMessages(sessionMessages, projectPath);
+    }
     return convertSessionMessages(sessionMessages);
-  }, [sessionMessages]);
+  }, [sessionMessages, sessionProvider, projectPath]);
 
   const scrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -228,14 +221,11 @@ export function useChatSessionState({
       if (allMessagesLoadedRef.current) return false;
       const session = selectedSessionRef.current;
       const project = selectedProjectRef.current;
-      if (!hasMoreMessages || !session || !project) {
+      if (offsetBeginRef.current <= 0 || !session || !project) {
         return false;
       }
 
       const provider = session.__provider || 'claude';
-      if (provider === 'cursor') {
-        return false;
-      }
 
       isLoadingMoreRef.current = true;
       const previousScrollHeight = container.scrollHeight;
@@ -245,7 +235,7 @@ export function useChatSessionState({
         const moreMessages = await loadSessionMessages(
           project.name,
           session.id,
-          true,
+          'history',
           provider,
         );
 
@@ -264,7 +254,7 @@ export function useChatSessionState({
         isLoadingMoreRef.current = false;
       }
     },
-    [hasMoreMessages, isLoadingMoreMessages, loadSessionMessages],
+    [isLoadingMoreMessages, loadSessionMessages],
   );
 
   const handleScroll = useCallback(async () => {
@@ -363,8 +353,8 @@ export function useChatSessionState({
             setCanAbortSession(false);
           }
 
-          messagesOffsetRef.current = 0;
-          setHasMoreMessages(false);
+          offsetBeginRef.current = -1;
+          offsetEndRef.current = -1;
           setTotalMessages(0);
           setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
           setAllMessagesLoaded(false);
@@ -385,8 +375,8 @@ export function useChatSessionState({
             });
           }
         } else if (currentSessionId === null) {
-          messagesOffsetRef.current = 0;
-          setHasMoreMessages(false);
+          offsetBeginRef.current = -1;
+          offsetEndRef.current = -1;
           setTotalMessages(0);
 
           if (ws) {
@@ -398,31 +388,21 @@ export function useChatSessionState({
           }
         }
 
+        setCurrentSessionId(sessionId);
         if (provider === 'cursor') {
-          setCurrentSessionId(sessionId);
           sessionStorage.setItem('cursorSessionId', sessionId);
+        }
 
-          if (!isSystemSessionChange) {
-            const converted = await loadCursorSessionMessages(projectPath, sessionId);
-            setSessionMessages([]);
-            setChatMessages(converted);
-          } else {
-            setIsSystemSessionChange(false);
-          }
+        if (!isSystemSessionChange) {
+          const messages = await loadSessionMessages(
+            projectName,
+            sessionId,
+            'initial',
+            session.__provider || 'claude',
+          );
+          setSessionMessages(messages);
         } else {
-          setCurrentSessionId(sessionId);
-
-          if (!isSystemSessionChange) {
-            const messages = await loadSessionMessages(
-              projectName,
-              sessionId,
-              false,
-              session.__provider || 'claude',
-            );
-            setSessionMessages(messages);
-          } else {
-            setIsSystemSessionChange(false);
-          }
+          setIsSystemSessionChange(false);
         }
       } else {
         if (!isSystemSessionChange) {
@@ -437,8 +417,8 @@ export function useChatSessionState({
 
         setCurrentSessionId(null);
         sessionStorage.removeItem('cursorSessionId');
-        messagesOffsetRef.current = 0;
-        setHasMoreMessages(false);
+        offsetBeginRef.current = -1;
+        offsetEndRef.current = -1;
         setTotalMessages(0);
         setTokenBudget(null);
       }
@@ -452,7 +432,6 @@ export function useChatSessionState({
   }, [
     // Intentionally exclude currentSessionId: this effect sets it and should not retrigger another full load.
     isSystemSessionChange,
-    loadCursorSessionMessages,
     loadSessionMessages,
     pendingViewSessionRef,
     projectName,
@@ -476,27 +455,20 @@ export function useChatSessionState({
 
     const reloadExternalMessages = async () => {
       try {
-        const provider = (localStorage.getItem('selected-provider') as Provider) || 'claude';
-
-        if (provider === 'cursor') {
-          const path = project.fullPath || project.path || '';
-          const converted = await loadCursorSessionMessages(path, session.id);
-          setSessionMessages([]);
-          setChatMessages(converted);
-          return;
-        }
-
-        const messages = await loadSessionMessages(
+        const newMessages = await loadSessionMessages(
           project.name,
           session.id,
-          false,
+          'external',
           session.__provider || 'claude',
         );
-        setSessionMessages(messages);
 
-        const shouldAutoScroll = Boolean(autoScrollToBottom) && isNearBottom();
-        if (shouldAutoScroll) {
-          setTimeout(() => scrollToBottom(), 200);
+        if (newMessages.length > 0) {
+          setSessionMessages((previous) => [...previous, ...newMessages]);
+
+          const shouldAutoScroll = Boolean(autoScrollToBottom) && isNearBottom();
+          if (shouldAutoScroll) {
+            setTimeout(() => scrollToBottom(), 200);
+          }
         }
       } catch (error) {
         console.error('Error reloading messages from external update:', error);
@@ -508,7 +480,6 @@ export function useChatSessionState({
     autoScrollToBottom,
     externalMessageUpdate,
     isNearBottom,
-    loadCursorSessionMessages,
     loadSessionMessages,
     projectName,
     scrollToBottom,
@@ -634,21 +605,22 @@ export function useChatSessionState({
     const wasLoading = prevLoadingRef.current;
     prevLoadingRef.current = isLoadingMoreMessages;
 
-    if (wasLoading && !isLoadingMoreMessages && hasMoreMessages) {
+    const hasMore = offsetBeginRef.current > 0;
+    if (wasLoading && !isLoadingMoreMessages && hasMore) {
       if (loadAllOverlayTimerRef.current) clearTimeout(loadAllOverlayTimerRef.current);
       setShowLoadAllOverlay(true);
       loadAllOverlayTimerRef.current = setTimeout(() => {
         setShowLoadAllOverlay(false);
       }, 2000);
     }
-    if (!hasMoreMessages && !isLoadingMoreMessages) {
+    if (!hasMore && !isLoadingMoreMessages) {
       if (loadAllOverlayTimerRef.current) clearTimeout(loadAllOverlayTimerRef.current);
       setShowLoadAllOverlay(false);
     }
     return () => {
       if (loadAllOverlayTimerRef.current) clearTimeout(loadAllOverlayTimerRef.current);
     };
-  }, [isLoadingMoreMessages, hasMoreMessages]);
+  }, [isLoadingMoreMessages]);
 
   const loadAllMessages = useCallback(async () => {
     const session = selectedSessionRef.current;
@@ -656,18 +628,6 @@ export function useChatSessionState({
     if (!session || !project) return;
     if (isLoadingAllMessages) return;
     const provider = session.__provider || 'claude';
-    if (provider === 'cursor') {
-      setVisibleMessageCount(Infinity);
-      setAllMessagesLoaded(true);
-      allMessagesLoadedRef.current = true;
-      setLoadAllJustFinished(true);
-      if (loadAllFinishedTimerRef.current) clearTimeout(loadAllFinishedTimerRef.current);
-      loadAllFinishedTimerRef.current = setTimeout(() => {
-        setLoadAllJustFinished(false);
-        setShowLoadAllOverlay(false);
-      }, 1000);
-      return;
-    }
 
     const requestSessionId = session.id;
 
@@ -684,8 +644,7 @@ export function useChatSessionState({
       const response = await (api.sessionMessages as any)(
         project.name,
         requestSessionId,
-        null,
-        0,
+        { limit: totalMessages, offsetEnd: totalMessages - 1 },
         provider,
       );
 
@@ -693,7 +652,7 @@ export function useChatSessionState({
 
       if (response.ok) {
         const data = await response.json();
-        const allMessages = data.messages || data;
+        const allMessages = data.messages || [];
 
         if (container) {
           pendingScrollRestoreRef.current = {
@@ -702,10 +661,10 @@ export function useChatSessionState({
           };
         }
 
-        setSessionMessages(Array.isArray(allMessages) ? allMessages : []);
-        setHasMoreMessages(false);
-        setTotalMessages(Array.isArray(allMessages) ? allMessages.length : 0);
-        messagesOffsetRef.current = Array.isArray(allMessages) ? allMessages.length : 0;
+        setSessionMessages(allMessages);
+        setTotalMessages(allMessages.length);
+        offsetBeginRef.current = 0;
+        offsetEndRef.current = allMessages.length - 1;
 
         setVisibleMessageCount(Infinity);
         setAllMessagesLoaded(true);
@@ -728,7 +687,7 @@ export function useChatSessionState({
       isLoadingMoreRef.current = false;
       setIsLoadingAllMessages(false);
     }
-  }, [isLoadingAllMessages, currentSessionId]);
+  }, [isLoadingAllMessages, currentSessionId, totalMessages]);
 
   const loadEarlierMessages = useCallback(() => {
     setVisibleMessageCount((previousCount) => previousCount + 100);
@@ -745,7 +704,7 @@ export function useChatSessionState({
     setSessionMessages,
     isLoadingSessionMessages,
     isLoadingMoreMessages,
-    hasMoreMessages,
+    hasMoreMessages: offsetBeginRef.current > 0,
     totalMessages,
     isSystemSessionChange,
     setIsSystemSessionChange,
@@ -772,6 +731,5 @@ export function useChatSessionState({
     isNearBottom,
     handleScroll,
     loadSessionMessages,
-    loadCursorSessionMessages,
   };
 }
