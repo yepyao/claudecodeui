@@ -283,6 +283,20 @@ async function extractProjectDirectory(projectName) {
     return originalPath;
   }
 
+  // Try Cursor's .workspace-trusted file (reliable source for actual path)
+  // This handles paths with hyphens in directory names correctly
+  const cursorEncodedName = projectName.startsWith('-') ? projectName.slice(1) : projectName;
+  const cursorTrustedPath = path.join(os.homedir(), '.cursor', 'projects', cursorEncodedName, '.workspace-trusted');
+  try {
+    const trustedData = JSON.parse(await fs.readFile(cursorTrustedPath, 'utf8'));
+    if (trustedData.workspacePath) {
+      projectDirectoryCache.set(projectName, trustedData.workspacePath);
+      return trustedData.workspacePath;
+    }
+  } catch {
+    // .workspace-trusted doesn't exist, continue to Claude method
+  }
+
   const projectDir = path.join(os.homedir(), '.claude', 'projects', projectName);
   const cwdCounts = new Map();
   let latestTimestamp = 0;
