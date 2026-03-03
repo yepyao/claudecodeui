@@ -23,22 +23,18 @@ export default function ClaudeStatus({
 }: ClaudeStatusProps) {
   const [elapsedTime, setElapsedTime] = useState(0);
   const [animationPhase, setAnimationPhase] = useState(0);
-  const [fakeTokens, setFakeTokens] = useState(0);
 
   useEffect(() => {
     if (!isLoading) {
       setElapsedTime(0);
-      setFakeTokens(0);
       return;
     }
 
     const startTime = Date.now();
-    const tokenRate = 30 + Math.random() * 20;
 
     const timer = window.setInterval(() => {
       const elapsed = Math.floor((Date.now() - startTime) / 1000);
       setElapsedTime(elapsed);
-      setFakeTokens(Math.floor(elapsed * tokenRate));
     }, 1000);
 
     return () => window.clearInterval(timer);
@@ -63,7 +59,7 @@ export default function ClaudeStatus({
   // Note: showThinking only controls the reasoning accordion in messages, not this processing indicator
   const actionIndex = Math.floor(elapsedTime / 3) % ACTION_WORDS.length;
   const statusText = status?.text || ACTION_WORDS[actionIndex];
-  const tokens = status?.tokens || fakeTokens;
+  const tokens = status?.tokens || 0;
   const canInterrupt = status?.can_interrupt !== false;
   const currentSpinner = SPINNER_CHARS[animationPhase];
 
