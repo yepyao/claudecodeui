@@ -63,6 +63,7 @@ interface UseChatComposerStateArgs {
   setClaudeStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
   setIsUserScrolledUp: (isScrolledUp: boolean) => void;
   setPendingPermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>>;
+  setWsMessages?: Dispatch<SetStateAction<ChatMessage[]>>;
 }
 
 interface MentionableFile {
@@ -117,6 +118,7 @@ export function useChatComposerState({
   setClaudeStatus,
   setIsUserScrolledUp,
   setPendingPermissionRequests,
+  setWsMessages,
 }: UseChatComposerStateArgs) {
   const [input, setInput] = useState(() => {
     if (typeof window !== 'undefined' && selectedProject) {
@@ -553,7 +555,7 @@ export function useChatComposerState({
         timestamp: new Date(),
       };
 
-      setChatMessages((previous) => [...previous, userMessage]);
+      setWsMessages?.((previous) => [...previous, userMessage]);
       setIsLoading(true);
       setCanAbortSession(true);
       setClaudeStatus({

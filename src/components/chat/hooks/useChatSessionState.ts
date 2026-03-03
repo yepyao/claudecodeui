@@ -93,6 +93,8 @@ export function useChatSessionState({
   selectedProjectRef.current = selectedProject;
   selectedSessionRef.current = selectedSession;
 
+  const [wsMessages, setWsMessages] = useState<ChatMessage[]>([]);
+
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isLoadingSessionRef = useRef(false);
   const isLoadingMoreRef = useRef(false);
@@ -105,6 +107,7 @@ export function useChatSessionState({
   const scrollPositionRef = useRef({ height: 0, top: 0 });
   const loadAllFinishedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadAllOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const createDiff = useMemo<DiffCalculator>(() => createCachedDiffCalculator(), []);
 
@@ -179,6 +182,49 @@ export function useChatSessionState({
     },
     [],
   );
+
+  const reconcileMessages = useCallback(async () => {
+    const project = selectedProjectRef.current;
+    const session = selectedSessionRef.current;
+    if (!project || !session) {
+      return;
+    }
+
+    // Clear any pending reconcile timer
+    if (reconcileTimerRef.current) {
+      clearTimeout(reconcileTimerRef.current);
+      reconcileTimerRef.current = null;
+    }
+
+    // Wait for file writes to complete
+    reconcileTimerRef.current = setTimeout(async () => {
+      reconcileTimerRef.current = null;
+
+      // No WS messages to reconcile
+      if (wsMessages.length === 0) {
+        return;
+      }
+
+      try {
+        const newMessages = await loadSessionMessages(
+          project.name,
+          session.id,
+          'external',
+          session.__provider || 'claude',
+        );
+
+        // Clear WS messages - API data will replace them
+        setWsMessages([]);
+
+        if (newMessages.length > 0) {
+          // Update sessionMessages with new API data
+          setSessionMessages((prev) => [...prev, ...newMessages]);
+        }
+      } catch (error) {
+        console.error('Error reconciling messages:', error);
+      }
+    }, 500);
+  }, [loadSessionMessages, wsMessages.length]);
 
   const convertedMessages = useMemo(() => {
     if (sessionProvider === 'cursor') {
@@ -358,6 +404,11 @@ export function useChatSessionState({
 
           offsetBeginRef.current = -1;
           offsetEndRef.current = -1;
+          setWsMessages([]);
+          if (reconcileTimerRef.current) {
+            clearTimeout(reconcileTimerRef.current);
+            reconcileTimerRef.current = null;
+          }
           setTotalMessages(0);
           setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
           setAllMessagesLoaded(false);
@@ -422,6 +473,11 @@ export function useChatSessionState({
         sessionStorage.removeItem('cursorSessionId');
         offsetBeginRef.current = -1;
         offsetEndRef.current = -1;
+        setWsMessages([]);
+        if (reconcileTimerRef.current) {
+          clearTimeout(reconcileTimerRef.current);
+          reconcileTimerRef.current = null;
+        }
         setTotalMessages(0);
         setTokenBudget(null);
       }
@@ -447,6 +503,11 @@ export function useChatSessionState({
 
   useEffect(() => {
     if (!externalMessageUpdate || !sessionId || !projectName) {
+      return;
+    }
+
+    // Skip if initial session load is still in progress
+    if (isLoadingSessionRef.current) {
       return;
     }
 
@@ -496,10 +557,10 @@ export function useChatSessionState({
   }, [pendingViewSessionRef, selectedSession?.id]);
 
   useEffect(() => {
-    if (sessionMessages.length > 0) {
-      setChatMessages(convertedMessages);
+    if (sessionMessages.length > 0 || wsMessages.length > 0) {
+      setChatMessages([...convertedMessages, ...wsMessages]);
     }
-  }, [convertedMessages, sessionMessages.length]);
+  }, [convertedMessages, sessionMessages.length, wsMessages]);
 
   useEffect(() => {
     if (projectName && chatMessages.length > 0) {
@@ -734,5 +795,7 @@ export function useChatSessionState({
     isNearBottom,
     handleScroll,
     loadSessionMessages,
+    setWsMessages,
+    reconcileMessages,
   };
 }

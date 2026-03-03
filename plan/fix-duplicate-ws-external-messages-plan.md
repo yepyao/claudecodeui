@@ -8,141 +8,72 @@ Messages are displayed twice because they can come from two sources:
 1. **WebSocket (realtime)**: Messages arrive via `useChatRealtimeHandlers` and update `chatMessages` directly
 2. **External Load**: Messages are fetched via API when `externalMessageUpdate` triggers, updating `sessionMessages` → `convertedMessages` → `chatMessages`
 
-## Current State Analysis
+## Solution: Separated Message Storage
 
-### Message Flow Paths
+### Architecture
 
-**Path 1: WebSocket (realtime)**
-```
-latestMessage → useChatRealtimeHandlers → setChatMessages() directly
-```
+Instead of mixing WS and API messages in a single `chatMessages` state, we now maintain them separately:
 
-**Path 2: External Load (API)**
 ```
-externalMessageUpdate change → loadSessionMessages('external') → 
-setSessionMessages() → convertedMessages → setChatMessages()
+API-loaded messages: sessionMessages → convertedMessages
+WS messages: wsMessages (temporary buffer)
+Display: chatMessages = convertedMessages + wsMessages
 ```
 
-### When External Updates Trigger
+### Data Flow
 
-In `useProjectsState.ts`, `externalMessageUpdate` increments when:
-1. File system changes detected for the session file (lines 355-363)
-2. Session blob updates detected (lines 368-378)
-3. Batch session updates received (lines 256-262)
+**During Active Session:**
+1. User message → `setWsMessages` (appended)
+2. WS response messages → `setWsMessages` (appended/updated)
+3. Display: `chatMessages = [...convertedMessages, ...wsMessages]`
 
-The guard `!activeSessions.has(selectedSession.id)` should prevent triggers during active sessions, but there are timing issues.
+**On Session Complete (Reconciliation):**
+1. Wait 500ms for file writes to complete
+2. Call `loadSessionMessages('external')` to get persisted messages
+3. Clear `wsMessages` (drop temporary buffer)
+4. Update `sessionMessages` with API data
+5. Display automatically updates: `chatMessages = [...convertedMessages]`
 
-### Root Causes
+### Key Files Modified
 
-1. **Race condition with activeSessions**: The session may not be in `activeSessions` quickly enough when it starts, allowing external updates to trigger
-2. **No deduplication**: When external messages load, they append to `sessionMessages` without checking if those messages already exist in `chatMessages`
-3. **Offset tracking doesn't account for WS messages**: The `offsetEndRef` tracks API-loaded messages but WS messages added to `chatMessages` aren't tracked
+1. **`useChatSessionState.ts`**:
+   - Added `wsMessages` state for temporary WS message buffer
+   - Modified `chatMessages` derivation: `[...convertedMessages, ...wsMessages]`
+   - `reconcileMessages()`: clears `wsMessages` and loads from API
+   - Removed `incrementWsMessageCount` / `wsMessageCountRef`
 
-### Reproduction Scenario
-1. User sends a message in an existing session
-2. Session becomes active, WS messages start arriving
-3. External update triggers (file change detected before activeSessions updated)
-4. API loads the same messages that WS already delivered
-5. Both sets of messages appear in the UI
+2. **`useChatRealtimeHandlers.ts`**:
+   - All message operations use `setWsMessages` instead of `setChatMessages`
+   - Removed `setChatMessages` from interface (no longer needed)
+   - `appendStreamingChunk` and `finalizeStreamingMessage` work with `setWsMessages`
 
-## Proposed Solutions
+3. **`useChatComposerState.ts`**:
+   - User messages added to `setWsMessages` instead of `setChatMessages`
+   - Removed `incrementWsMessageCount`
 
-### Option A: Message Deduplication by ID (Recommended)
+4. **`ChatInterface.tsx`**:
+   - Passes `setWsMessages` to hooks instead of `incrementWsMessageCount`
+   - Removed `setChatMessages` from `useChatRealtimeHandlers` call
 
-Add deduplication in `useChatSessionState.ts` when converting/setting messages:
+## Benefits
 
-```ts
-// In the effect that sets chatMessages from convertedMessages
-useEffect(() => {
-  if (sessionMessages.length > 0) {
-    setChatMessages((existing) => {
-      // Build a set of existing message identifiers
-      const existingKeys = new Set(
-        existing.map((msg) => getMessageKey(msg))
-      );
-      
-      // Filter out duplicates from converted messages
-      const newMessages = convertedMessages.filter(
-        (msg) => !existingKeys.has(getMessageKey(msg))
-      );
-      
-      // If no new messages, keep existing to avoid re-render
-      if (newMessages.length === 0) {
-        return existing;
-      }
-      
-      // Merge: keep existing, append only new
-      return [...existing, ...newMessages];
-    });
-  }
-}, [convertedMessages, sessionMessages.length]);
-```
+1. **Clean separation**: API data and WS data never mix
+2. **Simple reconciliation**: Just clear wsMessages and API replaces all
+3. **No counting/tracking**: No need to track message counts
+4. **No deduplication needed**: Sources are kept separate until reconciliation
 
-With a helper function:
-```ts
-function getMessageKey(msg: ChatMessage): string {
-  // Use toolId if present (unique identifier from Claude)
-  if (msg.toolId) return `tool:${msg.toolId}`;
-  
-  // Use timestamp + type + content hash for other messages
-  const timestamp = msg.timestamp?.getTime() || 0;
-  const contentHash = msg.content?.substring(0, 50) || '';
-  return `${msg.type}:${timestamp}:${contentHash}`;
-}
-```
+## Implementation Status
 
-### Option B: Suppress External Updates During Active Window
-
-Add a time-based guard to prevent external updates shortly after session becomes active:
-
-```ts
-// In useProjectsState.ts
-const sessionActiveTimestamps = useRef<Map<string, number>>(new Map());
-
-// When session becomes active, record timestamp
-// When checking externalMessageUpdate trigger:
-const activeTime = sessionActiveTimestamps.current.get(sessionId);
-const recentlyBecameActive = activeTime && Date.now() - activeTime < 2000;
-if (!activeSessions.has(sessionId) && !recentlyBecameActive) {
-  setExternalMessageUpdate((prev) => prev + 1);
-}
-```
-
-### Option C: Replace Instead of Merge for External Updates
-
-When external messages load, replace `chatMessages` entirely instead of merging:
-
-```ts
-// In the externalMessageUpdate effect
-if (newMessages.length > 0) {
-  // Replace sessionMessages with full range
-  setSessionMessages((previous) => [...previous, ...newMessages]);
-  // Let the conversion effect handle chatMessages
-}
-```
-
-But this would lose any streaming/partial messages from WS.
-
-## Recommended Approach
-
-**Option A (Message Deduplication)** is the safest because:
-1. It handles all edge cases regardless of timing
-2. Doesn't change when external updates trigger
-3. Preserves streaming messages from WS
-4. Simple to implement and test
-
-## Implementation Tasks
-
-- [ ] Add `getMessageKey` helper function in `useChatSessionState.ts`
-- [ ] Modify the `setChatMessages(convertedMessages)` effect to deduplicate
-- [ ] Add optional: timestamp-based fallback matching for messages without toolId
+- [x] Add `wsMessages` state in `useChatSessionState`
+- [x] Combine `convertedMessages + wsMessages` for display
+- [x] Update `useChatRealtimeHandlers` to use `setWsMessages`
+- [x] Update `reconcileMessages` to clear `wsMessages`
+- [x] Update `useChatComposerState` for user messages
+- [x] Remove all `incrementWsMessageCount` code
+- [x] TypeScript check passes
 
 ## Risk Assessment
 
-- **Low risk**: Deduplication is additive and doesn't change existing logic flow
-- **Edge case**: Messages with identical content and close timestamps could be falsely deduplicated (rare)
-- **Mitigation**: Use toolId as primary key when available (most Claude messages have this)
-
-## Questions
-- Should we also deduplicate when appending WS messages to `chatMessages`?
-- Should the deduplication window be configurable?
+- **Low risk**: Changes are localized to message handling
+- **Benefit**: Eliminates race conditions and duplicate message issues
+- **Trade-off**: wsMessages are temporary and lost if page refreshes before reconciliation (acceptable since they'll be loaded from API on refresh)

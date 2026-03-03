@@ -112,6 +112,8 @@ function ChatInterface({
     scrollToBottom,
     scrollToBottomAndReset,
     handleScroll,
+    setWsMessages,
+    reconcileMessages,
   } = useChatSessionState({
     selectedProject,
     selectedSession,
@@ -200,6 +202,7 @@ function ChatInterface({
     setClaudeStatus,
     setIsUserScrolledUp,
     setPendingPermissionRequests,
+    setWsMessages,
   });
 
   useChatRealtimeHandlers({
@@ -209,7 +212,6 @@ function ChatInterface({
     selectedSession,
     currentSessionId,
     setCurrentSessionId,
-    setChatMessages,
     setIsLoading,
     setCanAbortSession,
     setClaudeStatus,
@@ -224,6 +226,8 @@ function ChatInterface({
     onSessionNotProcessing,
     onReplaceTemporarySession,
     onNavigateToSession,
+    setWsMessages,
+    onReconcileMessages: reconcileMessages,
   });
 
   useEffect(() => {

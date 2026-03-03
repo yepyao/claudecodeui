@@ -33,7 +33,6 @@ interface UseChatRealtimeHandlersArgs {
   selectedSession: ProjectSession | null;
   currentSessionId: string | null;
   setCurrentSessionId: (sessionId: string | null) => void;
-  setChatMessages: Dispatch<SetStateAction<ChatMessage[]>>;
   setIsLoading: (loading: boolean) => void;
   setCanAbortSession: (canAbort: boolean) => void;
   setClaudeStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
@@ -48,10 +47,12 @@ interface UseChatRealtimeHandlersArgs {
   onSessionNotProcessing?: (sessionId?: string | null) => void;
   onReplaceTemporarySession?: (sessionId?: string | null) => void;
   onNavigateToSession?: (sessionId: string) => void;
+  setWsMessages?: Dispatch<SetStateAction<ChatMessage[]>>;
+  onReconcileMessages?: () => void;
 }
 
 const appendStreamingChunk = (
-  setChatMessages: Dispatch<SetStateAction<ChatMessage[]>>,
+  setMessages: Dispatch<SetStateAction<ChatMessage[]>>,
   chunk: string,
   newline = false,
 ) => {
@@ -59,11 +60,12 @@ const appendStreamingChunk = (
     return;
   }
 
-  setChatMessages((previous) => {
+  setMessages((previous) => {
     const updated = [...previous];
     const lastIndex = updated.length - 1;
     const last = updated[lastIndex];
-    if (last && last.type === 'assistant' && !last.isToolUse && last.isStreaming) {
+    // Don't append regular text to thinking messages - they should stay separate
+    if (last && last.type === 'assistant' && !last.isToolUse && !last.isThinking && last.isStreaming) {
       const nextContent = newline
         ? last.content
           ? `${last.content}\n${chunk}`
@@ -78,8 +80,8 @@ const appendStreamingChunk = (
   });
 };
 
-const finalizeStreamingMessage = (setChatMessages: Dispatch<SetStateAction<ChatMessage[]>>) => {
-  setChatMessages((previous) => {
+const finalizeStreamingMessage = (setMessages: Dispatch<SetStateAction<ChatMessage[]>>) => {
+  setMessages((previous) => {
     const updated = [...previous];
     const lastIndex = updated.length - 1;
     const last = updated[lastIndex];
@@ -98,7 +100,6 @@ export function useChatRealtimeHandlers({
   selectedSession,
   currentSessionId,
   setCurrentSessionId,
-  setChatMessages,
   setIsLoading,
   setCanAbortSession,
   setClaudeStatus,
@@ -113,6 +114,8 @@ export function useChatRealtimeHandlers({
   onSessionNotProcessing,
   onReplaceTemporarySession,
   onNavigateToSession,
+  setWsMessages,
+  onReconcileMessages,
 }: UseChatRealtimeHandlersArgs) {
   const lastProcessedMessageRef = useRef<LatestChatMessage | null>(null);
 
@@ -266,7 +269,7 @@ export function useChatRealtimeHandlers({
                 const chunk = streamBufferRef.current;
                 streamBufferRef.current = '';
                 streamTimerRef.current = null;
-                appendStreamingChunk(setChatMessages, chunk, false);
+                appendStreamingChunk(setWsMessages!, chunk, false);
               }, 100);
             }
             return;
@@ -279,8 +282,8 @@ export function useChatRealtimeHandlers({
             }
             const chunk = streamBufferRef.current;
             streamBufferRef.current = '';
-            appendStreamingChunk(setChatMessages, chunk, false);
-            finalizeStreamingMessage(setChatMessages);
+            appendStreamingChunk(setWsMessages!, chunk, false);
+            finalizeStreamingMessage(setWsMessages!);
             return;
           }
         }
@@ -330,7 +333,7 @@ export function useChatRealtimeHandlers({
 
               // Check if this is a child tool from a subagent
               if (parentToolUseId) {
-                setChatMessages((previous) =>
+                setWsMessages!((previous) =>
                   previous.map((message) => {
                     if (message.toolId === parentToolUseId && message.isSubagentContainer) {
                       const childTool = {
@@ -359,7 +362,7 @@ export function useChatRealtimeHandlers({
               // Check if this is a Task tool (subagent container)
               const isSubagentContainer = part.name === 'Task';
 
-              setChatMessages((previous) => [
+              setWsMessages!((previous) => [
                 ...previous,
                 {
                   type: 'assistant',
@@ -382,7 +385,7 @@ export function useChatRealtimeHandlers({
             if (part.type === 'text' && part.text?.trim()) {
               let content = decodeHtmlEntities(part.text);
               content = formatUsageLimitText(content);
-              setChatMessages((previous) => [
+              setWsMessages!((previous) => [
                 ...previous,
                 {
                   type: 'assistant',
@@ -395,7 +398,7 @@ export function useChatRealtimeHandlers({
         } else if (structuredMessageData && typeof structuredMessageData.content === 'string' && structuredMessageData.content.trim()) {
           let content = decodeHtmlEntities(structuredMessageData.content);
           content = formatUsageLimitText(content);
-          setChatMessages((previous) => [
+          setWsMessages!((previous) => [
             ...previous,
             {
               type: 'assistant',
@@ -413,7 +416,7 @@ export function useChatRealtimeHandlers({
               return;
             }
 
-            setChatMessages((previous) =>
+            setWsMessages!((previous) =>
               previous.map((message) => {
                 // Handle child tool results (route to parent's subagentState)
                 if (parentToolUseId && message.toolId === parentToolUseId && message.isSubagentContainer) {
@@ -474,7 +477,7 @@ export function useChatRealtimeHandlers({
               const chunk = streamBufferRef.current;
               streamBufferRef.current = '';
               streamTimerRef.current = null;
-              appendStreamingChunk(setChatMessages, chunk, true);
+              appendStreamingChunk(setWsMessages!, chunk, true);
             }, 100);
           }
         }
@@ -489,7 +492,7 @@ export function useChatRealtimeHandlers({
             typeof latestMessage.data === 'string'
               ? latestMessage.data
               : JSON.stringify(latestMessage.data ?? '', null, 2);
-          setChatMessages((previous) => [
+          setWsMessages!((previous) => [
             ...previous,
             {
               type: 'assistant',
@@ -545,7 +548,7 @@ export function useChatRealtimeHandlers({
         break;
 
       case 'claude-error':
-        setChatMessages((previous) => [
+        setWsMessages!((previous) => [
           ...previous,
           {
             type: 'error',
@@ -591,7 +594,8 @@ export function useChatRealtimeHandlers({
       case 'cursor-thinking':
         if (latestMessage.data?.text) {
           const thinkingText = latestMessage.data.text;
-          setChatMessages((previous) => {
+          let addedNewMessage = false;
+          setWsMessages!((previous) => {
             const updated = [...previous];
             const lastIndex = updated.length - 1;
             const last = updated[lastIndex];
@@ -609,14 +613,17 @@ export function useChatRealtimeHandlers({
                 isThinking: true,
                 isStreaming: true,
               });
+              addedNewMessage = true;
             }
             return updated;
           });
+          if (addedNewMessage) {
+          }
         }
         break;
 
       case 'cursor-tool-use':
-        setChatMessages((previous) => [
+        setWsMessages!((previous) => [
           ...previous,
           {
             type: 'assistant',
@@ -631,7 +638,7 @@ export function useChatRealtimeHandlers({
         break;
 
       case 'cursor-error':
-        setChatMessages((previous) => [
+        setWsMessages!((previous) => [
           ...previous,
           {
             type: 'error',
@@ -643,7 +650,7 @@ export function useChatRealtimeHandlers({
 
       case 'cursor-result': {
         // Finalize any streaming thinking message
-        finalizeStreamingMessage(setChatMessages);
+        finalizeStreamingMessage(setWsMessages!);
 
         const cursorCompletedSessionId = latestMessage.sessionId || currentSessionId;
         const pendingCursorSessionId = sessionStorage.getItem('pendingSessionId');
@@ -667,7 +674,8 @@ export function useChatRealtimeHandlers({
           const pendingChunk = streamBufferRef.current;
           streamBufferRef.current = '';
 
-          setChatMessages((previous) => {
+          let addedNewResultMessage = false;
+          setWsMessages!((previous) => {
             const updated = [...previous];
             const lastIndex = updated.length - 1;
             const last = updated[lastIndex];
@@ -685,9 +693,12 @@ export function useChatRealtimeHandlers({
                 timestamp: new Date(),
                 isStreaming: false,
               });
+              addedNewResultMessage = true;
             }
             return updated;
           });
+          if (addedNewResultMessage) {
+          }
         } catch (error) {
           console.warn('Error handling cursor-result message:', error);
         }
@@ -699,12 +710,13 @@ export function useChatRealtimeHandlers({
             setTimeout(() => window.refreshProjects?.(), 500);
           }
         }
+        onReconcileMessages?.();
         break;
       }
 
       case 'cursor-output':
         // Finalize any streaming thinking message before regular output
-        finalizeStreamingMessage(setChatMessages);
+        finalizeStreamingMessage(setWsMessages!);
 
         try {
           const raw = String(latestMessage.data ?? '');
@@ -720,7 +732,7 @@ export function useChatRealtimeHandlers({
                 const chunk = streamBufferRef.current;
                 streamBufferRef.current = '';
                 streamTimerRef.current = null;
-                appendStreamingChunk(setChatMessages, chunk, true);
+                appendStreamingChunk(setWsMessages!, chunk, true);
               }, 100);
             }
           }
@@ -752,6 +764,7 @@ export function useChatRealtimeHandlers({
           safeLocalStorage.removeItem(`chat_messages_${selectedProject.name}`);
         }
         setPendingPermissionRequests([]);
+        onReconcileMessages?.();
         break;
       }
 
@@ -766,7 +779,7 @@ export function useChatRealtimeHandlers({
             case 'agent_message':
               if (codexData.message?.content?.trim()) {
                 const content = decodeHtmlEntities(codexData.message.content);
-                setChatMessages((previous) => [
+                setWsMessages!((previous) => [
                   ...previous,
                   {
                     type: 'assistant',
@@ -780,7 +793,7 @@ export function useChatRealtimeHandlers({
             case 'reasoning':
               if (codexData.message?.content?.trim()) {
                 const content = decodeHtmlEntities(codexData.message.content);
-                setChatMessages((previous) => [
+                setWsMessages!((previous) => [
                   ...previous,
                   {
                     type: 'assistant',
@@ -794,7 +807,7 @@ export function useChatRealtimeHandlers({
 
             case 'command_execution':
               if (codexData.command) {
-                setChatMessages((previous) => [
+                setWsMessages!((previous) => [
                   ...previous,
                   {
                     type: 'assistant',
@@ -815,7 +828,7 @@ export function useChatRealtimeHandlers({
                 const changesList = codexData.changes
                   .map((change: { kind: string; path: string }) => `${change.kind}: ${change.path}`)
                   .join('\n');
-                setChatMessages((previous) => [
+                setWsMessages!((previous) => [
                   ...previous,
                   {
                     type: 'assistant',
@@ -834,7 +847,7 @@ export function useChatRealtimeHandlers({
               break;
 
             case 'mcp_tool_call':
-              setChatMessages((previous) => [
+              setWsMessages!((previous) => [
                 ...previous,
                 {
                   type: 'assistant',
@@ -852,7 +865,7 @@ export function useChatRealtimeHandlers({
 
             case 'error':
               if (codexData.message?.content) {
-                setChatMessages((previous) => [
+                setWsMessages!((previous) => [
                   ...previous,
                   {
                     type: 'error',
@@ -876,7 +889,7 @@ export function useChatRealtimeHandlers({
         if (codexData.type === 'turn_failed') {
           clearLoadingIndicators();
           markSessionsAsCompleted(latestMessage.sessionId, currentSessionId, selectedSession?.id);
-          setChatMessages((previous) => [
+          setWsMessages!((previous) => [
             ...previous,
             {
               type: 'error',
@@ -915,13 +928,14 @@ export function useChatRealtimeHandlers({
         if (selectedProject) {
           safeLocalStorage.removeItem(`chat_messages_${selectedProject.name}`);
         }
+        onReconcileMessages?.();
         break;
       }
 
       case 'codex-error':
         setIsLoading(false);
         setCanAbortSession(false);
-        setChatMessages((previous) => [
+        setWsMessages!((previous) => [
           ...previous,
           {
             type: 'error',
@@ -951,9 +965,9 @@ export function useChatRealtimeHandlers({
             streamBufferRef.current = '';
 
             if (chunk) {
-              appendStreamingChunk(setChatMessages, chunk, true);
+              appendStreamingChunk(setWsMessages!, chunk, true);
             }
-            finalizeStreamingMessage(setChatMessages);
+            finalizeStreamingMessage(setWsMessages!);
           } else if (!streamTimerRef.current && streamBufferRef.current) {
             streamTimerRef.current = window.setTimeout(() => {
               const chunk = streamBufferRef.current;
@@ -961,7 +975,7 @@ export function useChatRealtimeHandlers({
               streamTimerRef.current = null;
 
               if (chunk) {
-                appendStreamingChunk(setChatMessages, chunk, true);
+                appendStreamingChunk(setWsMessages!, chunk, true);
               }
             }, 100);
           }
@@ -972,7 +986,7 @@ export function useChatRealtimeHandlers({
       case 'gemini-error':
         setIsLoading(false);
         setCanAbortSession(false);
-        setChatMessages((previous) => [
+        setWsMessages!((previous) => [
           ...previous,
           {
             type: 'error',
@@ -983,7 +997,7 @@ export function useChatRealtimeHandlers({
         break;
 
       case 'gemini-tool-use':
-        setChatMessages((previous) => [
+        setWsMessages!((previous) => [
           ...previous,
           {
             type: 'assistant',
@@ -999,7 +1013,7 @@ export function useChatRealtimeHandlers({
         break;
 
       case 'gemini-tool-result':
-        setChatMessages((previous) =>
+        setWsMessages!((previous) =>
           previous.map((message) => {
             if (message.isToolUse && message.toolId === latestMessage.toolId) {
               return {
@@ -1030,7 +1044,7 @@ export function useChatRealtimeHandlers({
           }
 
           setPendingPermissionRequests([]);
-          setChatMessages((previous) => [
+          setWsMessages!((previous) => [
             ...previous,
             {
               type: 'assistant',
@@ -1039,7 +1053,7 @@ export function useChatRealtimeHandlers({
             },
           ]);
         } else {
-          setChatMessages((previous) => [
+          setWsMessages!((previous) => [
             ...previous,
             {
               type: 'error',
@@ -1123,7 +1137,6 @@ export function useChatRealtimeHandlers({
     selectedSession,
     currentSessionId,
     setCurrentSessionId,
-    setChatMessages,
     setIsLoading,
     setCanAbortSession,
     setClaudeStatus,
@@ -1135,5 +1148,7 @@ export function useChatRealtimeHandlers({
     onSessionNotProcessing,
     onReplaceTemporarySession,
     onNavigateToSession,
+    setWsMessages,
+    onReconcileMessages,
   ]);
 }
