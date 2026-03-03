@@ -741,6 +741,33 @@ export function useProjectsState({
     [navigate, selectedProject?.name],
   );
 
+  const appendProjectSessions = useCallback(
+    (projectName: string, provider: SessionProvider, newSessions: ProjectSession[], hasMore: boolean) => {
+      setProjects((prev) =>
+        prev.map((project) => {
+          if (project.name !== projectName) return project;
+
+          const sessionKey =
+            provider === 'cursor' ? 'cursorSessions' :
+            provider === 'codex' ? 'codexSessions' :
+            provider === 'gemini' ? 'geminiSessions' : 'sessions';
+          const metaKey = provider === 'cursor' ? 'cursorSessionMeta' : 'sessionMeta';
+
+          const existing = (project[sessionKey] as ProjectSession[] | undefined) || [];
+          const existingIds = new Set(existing.map((s) => s.id));
+          const deduped = newSessions.filter((s) => !existingIds.has(s.id));
+
+          return {
+            ...project,
+            [sessionKey]: [...existing, ...deduped],
+            [metaKey]: { ...project[metaKey] as Record<string, unknown>, hasMore },
+          };
+        }),
+      );
+    },
+    [],
+  );
+
   const sidebarSharedProps = useMemo(
     () => ({
       projects,
@@ -759,8 +786,10 @@ export function useProjectsState({
       settingsInitialTab,
       onCloseSettings: () => setShowSettings(false),
       isMobile,
+      onAppendSessions: appendProjectSessions,
     }),
     [
+      appendProjectSessions,
       handleNewSession,
       handleProjectDelete,
       handleProjectSelect,

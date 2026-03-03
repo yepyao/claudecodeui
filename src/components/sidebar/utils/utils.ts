@@ -1,7 +1,6 @@
 import type { TFunction } from 'i18next';
 import type { Project } from '../../../types/app';
 import type {
-  AdditionalSessionsByProject,
   ProjectSortOrder,
   SettingsProject,
   SessionViewModel,
@@ -96,18 +95,13 @@ export const createSessionViewModel = (
 
 export const getAllSessions = (
   project: Project,
-  additionalSessions: AdditionalSessionsByProject,
-  additionalCursorSessions: AdditionalSessionsByProject = {},
 ): SessionWithProvider[] => {
-  const claudeSessions = [
-    ...(project.sessions || []),
-    ...(additionalSessions[project.name] || []),
-  ].map((session) => ({ ...session, __provider: 'claude' as const }));
+  const claudeSessions = (project.sessions || []).map((session) => ({
+    ...session,
+    __provider: 'claude' as const,
+  }));
 
-  const cursorSessions = [
-    ...(project.cursorSessions || []),
-    ...(additionalCursorSessions[project.name] || []),
-  ].map((session) => ({
+  const cursorSessions = (project.cursorSessions || []).map((session) => ({
     ...session,
     __provider: 'cursor' as const,
   }));
@@ -144,10 +138,8 @@ export const getAllSessions = (
 
 export const getProjectLastActivity = (
   project: Project,
-  additionalSessions: AdditionalSessionsByProject,
-  additionalCursorSessions: AdditionalSessionsByProject = {},
 ): Date => {
-  const sessions = getAllSessions(project, additionalSessions, additionalCursorSessions);
+  const sessions = getAllSessions(project);
   if (sessions.length === 0) {
     return new Date(0);
   }
@@ -162,8 +154,6 @@ export const sortProjects = (
   projects: Project[],
   projectSortOrder: ProjectSortOrder,
   starredProjects: Set<string>,
-  additionalSessions: AdditionalSessionsByProject,
-  additionalCursorSessions: AdditionalSessionsByProject = {},
 ): Project[] => {
   const byName = [...projects];
 
@@ -181,8 +171,8 @@ export const sortProjects = (
 
     if (projectSortOrder === 'date') {
       return (
-        getProjectLastActivity(projectB, additionalSessions, additionalCursorSessions).getTime() -
-        getProjectLastActivity(projectA, additionalSessions, additionalCursorSessions).getTime()
+        getProjectLastActivity(projectB).getTime() -
+        getProjectLastActivity(projectA).getTime()
       );
     }
 

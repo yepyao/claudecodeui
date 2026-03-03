@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react';
-import type { AppTab, Project, ProjectSession } from '../../../types/app';
+import type { AppTab, Project, ProjectSession, SessionProvider } from '../../../types/app';
 
 export type SessionLifecycleHandler = (sessionId?: string | null) => void;
 
@@ -53,7 +53,7 @@ export type MainContentProps = {
   onNavigateToSession: (targetSessionId: string) => void;
   onShowSettings: () => void;
   externalMessageUpdate: number;
-  onMarkSessionAsRead?: (projectName: string, sessionId: string) => void;
+  onMarkSessionAsRead?: (projectName: string, sessionId: string, provider?: SessionProvider, lastBlobOffset?: number) => void;
 };
 
 export type MainContentHeaderProps = {

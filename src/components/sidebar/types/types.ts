@@ -7,7 +7,6 @@ export type SessionWithProvider = ProjectSession & {
   __provider: SessionProvider;
 };
 
-export type AdditionalSessionsByProject = Record<string, ProjectSession[]>;
 export type LoadingSessionsByProject = Record<string, boolean>;
 
 export type DeleteProjectConfirmation = {
@@ -39,6 +38,7 @@ export type SidebarProps = {
   settingsInitialTab: string;
   onCloseSettings: () => void;
   isMobile: boolean;
+  onAppendSessions: (projectName: string, provider: SessionProvider, sessions: ProjectSession[], hasMore: boolean) => void;
 };
 
 export type SessionViewModel = {

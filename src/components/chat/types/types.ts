@@ -124,7 +124,7 @@ export interface ChatInterfaceProps {
   autoScrollToBottom?: boolean;
   sendByCtrlEnter?: boolean;
   externalMessageUpdate?: number;
-  onMarkSessionAsRead?: (projectName: string, sessionId: string) => void;
+  onMarkSessionAsRead?: (projectName: string, sessionId: string, provider?: SessionProvider, lastBlobOffset?: number) => void;
   onTaskClick?: (...args: unknown[]) => void;
   onShowAllTasks?: (() => void) | null;
 }

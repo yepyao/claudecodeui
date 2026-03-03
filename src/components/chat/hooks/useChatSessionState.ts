@@ -3,7 +3,7 @@ import type { MutableRefObject } from 'react';
 
 import { api, authenticatedFetch } from '../../../utils/api';
 import type { ChatMessage, Provider } from '../types/types';
-import type { Project, ProjectSession } from '../../../types/app';
+import type { Project, ProjectSession, SessionProvider } from '../../../types/app';
 import { safeLocalStorage } from '../utils/chatStorage';
 import {
   convertCursorSessionMessages,
@@ -30,7 +30,7 @@ interface UseChatSessionStateArgs {
   processingSessions?: Set<string>;
   resetStreamingState: () => void;
   pendingViewSessionRef: MutableRefObject<PendingViewSession | null>;
-  onMarkSessionAsRead?: (projectName: string, sessionId: string) => void;
+  onMarkSessionAsRead?: (projectName: string, sessionId: string, provider?: SessionProvider, lastBlobOffset?: number) => void;
 }
 
 interface ScrollRestoreState {
@@ -277,7 +277,12 @@ export function useChatSessionState({
     setIsUserScrolledUp(!nearBottom);
 
     if (nearBottom && selectedProject?.name && selectedSession?.id) {
-      onMarkSessionAsRead?.(selectedProject.name, selectedSession.id);
+      onMarkSessionAsRead?.(
+        selectedProject.name,
+        selectedSession.id,
+        selectedSession.__provider as SessionProvider | undefined,
+        selectedSession.lastBlobOffset as number | undefined,
+      );
     }
 
     if (!allMessagesLoadedRef.current) {
@@ -299,7 +304,7 @@ export function useChatSessionState({
         topLoadLockRef.current = true;
       }
     }
-  }, [isNearBottom, loadOlderMessages, onMarkSessionAsRead, selectedProject?.name, selectedSession?.id]);
+  }, [isNearBottom, loadOlderMessages, onMarkSessionAsRead, selectedProject?.name, selectedSession?.id, selectedSession?.__provider, selectedSession?.lastBlobOffset]);
 
   useLayoutEffect(() => {
     if (!pendingScrollRestoreRef.current || !scrollContainerRef.current) {
