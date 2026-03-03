@@ -2,10 +2,11 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import ThinkingModeSelector from './ThinkingModeSelector';
 import TokenUsagePie from './TokenUsagePie';
-import type { PermissionMode, Provider } from '../../types/types';
+import type { CursorSessionMode, PermissionMode, Provider } from '../../types/types';
 
 interface ChatInputControlsProps {
   permissionMode: PermissionMode | string;
+  cursorSessionMode: CursorSessionMode | string;
   onModeSwitch: () => void;
   provider: Provider | string;
   thinkingMode: string;
@@ -22,6 +23,7 @@ interface ChatInputControlsProps {
 
 export default function ChatInputControls({
   permissionMode,
+  cursorSessionMode,
   onModeSwitch,
   provider,
   thinkingMode,
@@ -37,48 +39,84 @@ export default function ChatInputControls({
 }: ChatInputControlsProps) {
   const { t } = useTranslation('chat');
 
+  const getCursorModeStyle = () => {
+    if (cursorSessionMode === 'ask') {
+      return 'bg-blue-50 dark:bg-blue-900/15 text-blue-700 dark:text-blue-300 border-blue-300/60 dark:border-blue-600/40 hover:bg-blue-100 dark:hover:bg-blue-900/25';
+    }
+    if (cursorSessionMode === 'plan') {
+      return 'bg-purple-50 dark:bg-purple-900/15 text-purple-700 dark:text-purple-300 border-purple-300/60 dark:border-purple-600/40 hover:bg-purple-100 dark:hover:bg-purple-900/25';
+    }
+    return 'bg-muted/50 text-muted-foreground border-border/60 hover:bg-muted';
+  };
+
+  const getCursorModeDotColor = () => {
+    if (cursorSessionMode === 'ask') return 'bg-blue-500';
+    if (cursorSessionMode === 'plan') return 'bg-purple-500';
+    return 'bg-muted-foreground';
+  };
+
   return (
     <div className="flex items-center justify-center gap-2 sm:gap-3 flex-wrap">
-      <button
-        type="button"
-        onClick={onModeSwitch}
-        className={`px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-sm font-medium border transition-all duration-200 ${
-          permissionMode === 'default'
-            ? 'bg-muted/50 text-muted-foreground border-border/60 hover:bg-muted'
-            : permissionMode === 'acceptEdits'
-              ? 'bg-green-50 dark:bg-green-900/15 text-green-700 dark:text-green-300 border-green-300/60 dark:border-green-600/40 hover:bg-green-100 dark:hover:bg-green-900/25'
-              : permissionMode === 'bypassPermissions'
-                ? 'bg-orange-50 dark:bg-orange-900/15 text-orange-700 dark:text-orange-300 border-orange-300/60 dark:border-orange-600/40 hover:bg-orange-100 dark:hover:bg-orange-900/25'
-                : 'bg-primary/5 text-primary border-primary/20 hover:bg-primary/10'
-        }`}
-        title={t('input.clickToChangeMode')}
-      >
-        <div className="flex items-center gap-1.5">
-          <div
-            className={`w-1.5 h-1.5 rounded-full ${
-              permissionMode === 'default'
-                ? 'bg-muted-foreground'
-                : permissionMode === 'acceptEdits'
-                  ? 'bg-green-500'
-                  : permissionMode === 'bypassPermissions'
-                    ? 'bg-orange-500'
-                    : 'bg-primary'
-            }`}
-          />
-          <span>
-            {permissionMode === 'default' && t('codex.modes.default')}
-            {permissionMode === 'acceptEdits' && t('codex.modes.acceptEdits')}
-            {permissionMode === 'bypassPermissions' && t('codex.modes.bypassPermissions')}
-            {permissionMode === 'plan' && t('codex.modes.plan')}
-          </span>
-        </div>
-      </button>
+      {provider === 'cursor' ? (
+        <button
+          type="button"
+          onClick={onModeSwitch}
+          className={`px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-sm font-medium border transition-all duration-200 ${getCursorModeStyle()}`}
+          title={t('input.clickToChangeMode')}
+        >
+          <div className="flex items-center gap-1.5">
+            <div className={`w-1.5 h-1.5 rounded-full ${getCursorModeDotColor()}`} />
+            <span>
+              {cursorSessionMode === 'default' && t('cursor.modes.default')}
+              {cursorSessionMode === 'ask' && t('cursor.modes.ask')}
+              {cursorSessionMode === 'plan' && t('cursor.modes.plan')}
+            </span>
+          </div>
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={onModeSwitch}
+          className={`px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-sm font-medium border transition-all duration-200 ${
+            permissionMode === 'default'
+              ? 'bg-muted/50 text-muted-foreground border-border/60 hover:bg-muted'
+              : permissionMode === 'acceptEdits'
+                ? 'bg-green-50 dark:bg-green-900/15 text-green-700 dark:text-green-300 border-green-300/60 dark:border-green-600/40 hover:bg-green-100 dark:hover:bg-green-900/25'
+                : permissionMode === 'bypassPermissions'
+                  ? 'bg-orange-50 dark:bg-orange-900/15 text-orange-700 dark:text-orange-300 border-orange-300/60 dark:border-orange-600/40 hover:bg-orange-100 dark:hover:bg-orange-900/25'
+                  : 'bg-primary/5 text-primary border-primary/20 hover:bg-primary/10'
+          }`}
+          title={t('input.clickToChangeMode')}
+        >
+          <div className="flex items-center gap-1.5">
+            <div
+              className={`w-1.5 h-1.5 rounded-full ${
+                permissionMode === 'default'
+                  ? 'bg-muted-foreground'
+                  : permissionMode === 'acceptEdits'
+                    ? 'bg-green-500'
+                    : permissionMode === 'bypassPermissions'
+                      ? 'bg-orange-500'
+                      : 'bg-primary'
+              }`}
+            />
+            <span>
+              {permissionMode === 'default' && t('codex.modes.default')}
+              {permissionMode === 'acceptEdits' && t('codex.modes.acceptEdits')}
+              {permissionMode === 'bypassPermissions' && t('codex.modes.bypassPermissions')}
+              {permissionMode === 'plan' && t('codex.modes.plan')}
+            </span>
+          </div>
+        </button>
+      )}
 
       {provider === 'claude' && (
         <ThinkingModeSelector selectedMode={thinkingMode} onModeChange={setThinkingMode} onClose={() => {}} className="" />
       )}
 
-      <TokenUsagePie used={tokenBudget?.used || 0} total={tokenBudget?.total || parseInt(import.meta.env.VITE_CONTEXT_WINDOW) || 160000} />
+      {provider !== 'cursor' && (
+        <TokenUsagePie used={tokenBudget?.used || 0} total={tokenBudget?.total || parseInt(import.meta.env.VITE_CONTEXT_WINDOW) || 160000} />
+      )}
 
       <button
         type="button"

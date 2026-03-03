@@ -11,7 +11,8 @@ let activeCursorProcesses = new Map(); // Track active processes by session ID
 
 async function spawnCursor(command, options = {}, ws) {
   return new Promise(async (resolve, reject) => {
-    const { sessionId, projectPath, cwd, resume, toolsSettings, skipPermissions, model, images } = options;
+    const { sessionId, projectPath, cwd, resume, toolsSettings, skipPermissions, sessionMode, model, images } = options;
+    console.log('[DEBUG] Cursor options received:', { sessionMode, skipPermissions, model });
     let capturedSessionId = sessionId; // Track session ID throughout the process
     let sessionCreatedSent = false; // Track if we've already sent session-created event
     let messageBuffer = ''; // Buffer for accumulating assistant messages
@@ -44,8 +45,13 @@ async function spawnCursor(command, options = {}, ws) {
       args.push('--output-format', 'stream-json');
     }
     
-    // Add skip permissions flag if enabled
-    if (skipPermissions || settings.skipPermissions) {
+    // Add session mode flag for 'ask' or 'plan' modes
+    // Note: -f flag should not be used with ask/plan modes
+    if (sessionMode === 'ask' || sessionMode === 'plan') {
+      args.push('--mode', sessionMode);
+      console.log(`📋 Using --mode ${sessionMode}`);
+    } else if (skipPermissions || settings.skipPermissions) {
+      // Only add -f flag in default mode when skipPermissions is enabled
       args.push('-f');
       console.log('⚠️  Using -f flag (skip permissions)');
     }

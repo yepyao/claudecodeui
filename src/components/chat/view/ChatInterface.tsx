@@ -68,6 +68,7 @@ function ChatInterface({
     geminiModel,
     setGeminiModel,
     permissionMode,
+    cursorSessionMode,
     pendingPermissionRequests,
     setPendingPermissionRequests,
     cyclePermissionMode,
@@ -174,6 +175,7 @@ function ChatInterface({
     currentSessionId,
     provider,
     permissionMode,
+    cursorSessionMode,
     cyclePermissionMode,
     cursorModel,
     claudeModel,
@@ -332,6 +334,7 @@ function ChatInterface({
           onAbortSession={handleAbortSession}
           provider={provider}
           permissionMode={permissionMode}
+          cursorSessionMode={cursorSessionMode}
           onModeSwitch={cyclePermissionMode}
           thinkingMode={thinkingMode}
           setThinkingMode={setThinkingMode}

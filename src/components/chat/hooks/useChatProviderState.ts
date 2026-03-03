@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { authenticatedFetch } from '../../../utils/api';
 import { CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS, GEMINI_MODELS } from '../../../../shared/modelConstants';
-import type { PendingPermissionRequest, PermissionMode, Provider } from '../types/types';
+import type { CursorSessionMode, PendingPermissionRequest, PermissionMode, Provider } from '../types/types';
 import type { ProjectSession, SessionProvider } from '../../../types/app';
 
 interface UseChatProviderStateArgs {
@@ -10,6 +10,7 @@ interface UseChatProviderStateArgs {
 
 export function useChatProviderState({ selectedSession }: UseChatProviderStateArgs) {
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
+  const [cursorSessionMode, setCursorSessionMode] = useState<CursorSessionMode>('default');
   const [pendingPermissionRequests, setPendingPermissionRequests] = useState<PendingPermissionRequest[]>([]);
   const [provider, setProvider] = useState<SessionProvider>(() => {
     return (localStorage.getItem('selected-provider') as SessionProvider) || 'claude';
@@ -36,6 +37,9 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
 
     const savedMode = localStorage.getItem(`permissionMode-${selectedSession.id}`);
     setPermissionMode((savedMode as PermissionMode) || 'default');
+
+    const savedCursorMode = localStorage.getItem(`cursorSessionMode-${selectedSession.id}`);
+    setCursorSessionMode((savedCursorMode as CursorSessionMode) || 'default');
   }, [selectedSession?.id]);
 
   const sessionProvider = selectedSession?.__provider;
@@ -86,6 +90,19 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   }, [provider]);
 
   const cyclePermissionMode = useCallback(() => {
+    if (provider === 'cursor') {
+      const cursorModes: CursorSessionMode[] = ['default', 'ask', 'plan'];
+      const currentIndex = cursorModes.indexOf(cursorSessionMode);
+      const nextIndex = (currentIndex + 1) % cursorModes.length;
+      const nextMode = cursorModes[nextIndex];
+      setCursorSessionMode(nextMode);
+
+      if (selectedSession?.id) {
+        localStorage.setItem(`cursorSessionMode-${selectedSession.id}`, nextMode);
+      }
+      return;
+    }
+
     const modes: PermissionMode[] =
       provider === 'codex'
         ? ['default', 'acceptEdits', 'bypassPermissions']
@@ -99,7 +116,7 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     if (selectedSession?.id) {
       localStorage.setItem(`permissionMode-${selectedSession.id}`, nextMode);
     }
-  }, [permissionMode, provider, selectedSession?.id]);
+  }, [cursorSessionMode, permissionMode, provider, selectedSession?.id]);
 
   return {
     provider,
@@ -114,6 +131,8 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     setGeminiModel,
     permissionMode,
     setPermissionMode,
+    cursorSessionMode,
+    setCursorSessionMode,
     pendingPermissionRequests,
     setPendingPermissionRequests,
     cyclePermissionMode,

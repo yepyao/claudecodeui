@@ -17,7 +17,7 @@ import type {
   SetStateAction,
   TouchEvent,
 } from 'react';
-import type { PendingPermissionRequest, PermissionMode, Provider } from '../../types/types';
+import type { CursorSessionMode, PendingPermissionRequest, PermissionMode, Provider } from '../../types/types';
 
 interface MentionableFile {
   name: string;
@@ -46,6 +46,7 @@ interface ChatComposerProps {
   onAbortSession: () => void;
   provider: Provider | string;
   permissionMode: PermissionMode | string;
+  cursorSessionMode: CursorSessionMode | string;
   onModeSwitch: () => void;
   thinkingMode: string;
   setThinkingMode: Dispatch<SetStateAction<string>>;
@@ -103,6 +104,7 @@ export default function ChatComposer({
   onAbortSession,
   provider,
   permissionMode,
+  cursorSessionMode,
   onModeSwitch,
   thinkingMode,
   setThinkingMode,
@@ -190,6 +192,7 @@ export default function ChatComposer({
 
         {!hasQuestionPanel && <ChatInputControls
           permissionMode={permissionMode}
+          cursorSessionMode={cursorSessionMode}
           onModeSwitch={onModeSwitch}
           provider={provider}
           thinkingMode={thinkingMode}

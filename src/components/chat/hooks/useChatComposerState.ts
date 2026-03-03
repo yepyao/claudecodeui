@@ -18,6 +18,7 @@ import { grantClaudeToolPermission } from '../utils/chatPermissions';
 import { safeLocalStorage } from '../utils/chatStorage';
 import type {
   ChatMessage,
+  CursorSessionMode,
   PendingPermissionRequest,
   PermissionMode,
 } from '../types/types';
@@ -37,6 +38,7 @@ interface UseChatComposerStateArgs {
   currentSessionId: string | null;
   provider: SessionProvider;
   permissionMode: PermissionMode | string;
+  cursorSessionMode: CursorSessionMode | string;
   cyclePermissionMode: () => void;
   cursorModel: string;
   claudeModel: string;
@@ -90,6 +92,7 @@ export function useChatComposerState({
   currentSessionId,
   provider,
   permissionMode,
+  cursorSessionMode,
   cyclePermissionMode,
   cursorModel,
   claudeModel,
@@ -617,7 +620,8 @@ export function useChatComposerState({
             sessionId: effectiveSessionId,
             resume: Boolean(effectiveSessionId),
             model: cursorModel,
-            skipPermissions: toolsSettings?.skipPermissions || false,
+            sessionMode: cursorSessionMode,
+            skipPermissions: cursorSessionMode === 'default' && (toolsSettings?.skipPermissions || false),
             toolsSettings,
           },
         });
@@ -688,6 +692,7 @@ export function useChatComposerState({
       codexModel,
       currentSessionId,
       cursorModel,
+      cursorSessionMode,
       executeCommand,
       geminiModel,
       isLoading,

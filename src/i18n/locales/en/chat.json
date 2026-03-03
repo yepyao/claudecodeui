@@ -98,6 +98,19 @@
     },
     "technicalDetails": "Technical details"
   },
+  "cursor": {
+    "sessionMode": "Session Mode",
+    "modes": {
+      "default": "Default",
+      "ask": "Ask Mode",
+      "plan": "Plan Mode"
+    },
+    "descriptions": {
+      "default": "Normal agent mode with full capabilities",
+      "ask": "Q&A style for explanations and questions (read-only)",
+      "plan": "Read-only planning mode - analyze and propose plans without making edits"
+    }
+  },
   "gemini": {
     "permissionMode": "Gemini Permission Mode",
     "description": "Control how Gemini CLI handles operation approvals.",
