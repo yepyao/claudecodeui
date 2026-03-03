@@ -156,6 +156,15 @@ async function spawnCursor(command, options = {}, ws) {
               }
               break;
               
+            case 'thinking':
+              // Forward thinking deltas to frontend
+              ws.send({
+                type: 'cursor-thinking',
+                data: response,
+                sessionId: capturedSessionId || sessionId || null
+              });
+              break;
+
             case 'result':
               // Session complete
               console.log('Cursor session result:', response);

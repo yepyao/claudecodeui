@@ -398,14 +398,14 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
                 </div>
               </div>
             ) : message.isThinking ? (
-              /* Thinking messages - collapsible by default */
+              /* Thinking messages - expanded while streaming, collapsed when complete */
               <div className="text-sm text-gray-700 dark:text-gray-300">
-                <details className="group">
+                <details className="group" open={message.isStreaming}>
                   <summary className="cursor-pointer text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 font-medium flex items-center gap-2">
                     <svg className="w-3 h-3 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                     </svg>
-                    <span>{t('thinking.emoji')}</span>
+                    <span>{message.isStreaming ? t('thinking.inProgress', 'Thinking...') : t('thinking.emoji')}</span>
                   </summary>
                   <div className="mt-2 pl-4 border-l-2 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 text-sm">
                     <Markdown className="prose prose-sm max-w-none dark:prose-invert prose-gray">

@@ -58,7 +58,8 @@
   },
   "thinking": {
     "title": "Thinking...",
-    "emoji": "💭 Thinking..."
+    "emoji": "💭 Thinking...",
+    "inProgress": "💭 Thinking..."
   },
   "json": {
     "response": "JSON Response"

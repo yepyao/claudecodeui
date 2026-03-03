@@ -588,6 +588,33 @@ export function useChatRealtimeHandlers({
       case 'cursor-user':
         break;
 
+      case 'cursor-thinking':
+        if (latestMessage.data?.text) {
+          const thinkingText = latestMessage.data.text;
+          setChatMessages((previous) => {
+            const updated = [...previous];
+            const lastIndex = updated.length - 1;
+            const last = updated[lastIndex];
+            if (last && last.type === 'assistant' && last.isThinking && !last.isToolUse) {
+              updated[lastIndex] = {
+                ...last,
+                content: (last.content || '') + thinkingText,
+                isStreaming: true,
+              };
+            } else {
+              updated.push({
+                type: 'assistant',
+                content: thinkingText,
+                timestamp: new Date(),
+                isThinking: true,
+                isStreaming: true,
+              });
+            }
+            return updated;
+          });
+        }
+        break;
+
       case 'cursor-tool-use':
         setChatMessages((previous) => [
           ...previous,
@@ -615,6 +642,9 @@ export function useChatRealtimeHandlers({
         break;
 
       case 'cursor-result': {
+        // Finalize any streaming thinking message
+        finalizeStreamingMessage(setChatMessages);
+
         const cursorCompletedSessionId = latestMessage.sessionId || currentSessionId;
         const pendingCursorSessionId = sessionStorage.getItem('pendingSessionId');
 
@@ -673,6 +703,9 @@ export function useChatRealtimeHandlers({
       }
 
       case 'cursor-output':
+        // Finalize any streaming thinking message before regular output
+        finalizeStreamingMessage(setChatMessages);
+
         try {
           const raw = String(latestMessage.data ?? '');
           const cleaned = raw
