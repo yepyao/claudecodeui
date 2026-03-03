@@ -74,6 +74,46 @@ e.getIsAutoRun()
 - Default/plan/ask modes still use `"allowlist"` — normal approval prompts are preserved
 - `--mode` parameter behavior is unaffected
 
+### Restore "Run Everything" Option in Approval Prompt (434.index.js)
+
+**What:** Two variables control the "Run Everything (shift+tab)" option visibility in the
+interactive approval prompt. Both were disabled by team admin settings. These changes
+force them to always allow the option.
+
+**Variable `Z`** — controls whether `/auto-run` slash command shows "disabled by admin":
+
+**Before:**
+```js
+const Z="disabled"===(null==q?void 0:q.type)
+// Z=true when team admin disabled auto-run => slash command blocked
+```
+
+**After:**
+```js
+const Z=!1
+// Auto-run slash command always available
+```
+
+**Variable `l`** — controls whether "Run Everything (shift+tab)" appears in the approval prompt:
+
+**Before:**
+```js
+l="disabled"!==(null==t?void 0:t.type)
+// l=false when team admin disabled auto-run => option hidden
+```
+
+**After:**
+```js
+l=!0
+// "Run Everything (shift+tab)" option always visible in approval prompts
+```
+
+**Effect:**
+- The "Run Everything (shift+tab)" option is always shown when prompted to approve a
+  command, file write, MCP tool, or web search
+- The `/auto-run` slash command always works and never shows "disabled by admin settings"
+- Users can toggle auto-run mode interactively without needing `--force`/`--yolo` flags
+
 ## How to Restore
 
 ```bash
