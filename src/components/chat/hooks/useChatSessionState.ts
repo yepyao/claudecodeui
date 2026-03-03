@@ -111,6 +111,19 @@ export function useChatSessionState({
 
   const createDiff = useMemo<DiffCalculator>(() => createCachedDiffCalculator(), []);
 
+  // Helper to deduplicate messages by messageOffset
+  const deduplicateMessages = useCallback((existing: any[], incoming: any[]): any[] => {
+    const existingOffsets = new Set(
+      existing
+        .map((msg) => msg.messageOffset)
+        .filter((offset): offset is number => offset !== undefined),
+    );
+    return incoming.filter((msg) => {
+      if (msg.messageOffset === undefined) return true;
+      return !existingOffsets.has(msg.messageOffset);
+    });
+  }, []);
+
   const loadSessionMessages = useCallback(
     async (
       projectName: string,
@@ -157,6 +170,13 @@ export function useChatSessionState({
         const messages = data.messages || [];
         setTotalMessages(Number(data.total || 0));
 
+        // Attach messageOffset to each message for deduplication
+        const batchOffsetBegin = data.offsetBegin ?? 0;
+        const messagesWithOffset = messages.map((msg: any, index: number) => ({
+          ...msg,
+          messageOffset: batchOffsetBegin + index,
+        }));
+
         if (data.offsetBegin >= 0 && data.offsetEnd >= 0 && messages.length > 0) {
           if (mode === 'history') {
             offsetBeginRef.current = data.offsetBegin;
@@ -168,7 +188,7 @@ export function useChatSessionState({
           }
         }
 
-        return messages;
+        return messagesWithOffset;
       } catch (error) {
         console.error('Error loading session messages:', error);
         return [];
@@ -217,14 +237,17 @@ export function useChatSessionState({
         setWsMessages([]);
 
         if (newMessages.length > 0) {
-          // Update sessionMessages with new API data
-          setSessionMessages((prev) => [...prev, ...newMessages]);
+          // Update sessionMessages with new API data, deduplicating by offset
+          setSessionMessages((prev) => {
+            const deduplicated = deduplicateMessages(prev, newMessages);
+            return deduplicated.length > 0 ? [...prev, ...deduplicated] : prev;
+          });
         }
       } catch (error) {
         console.error('Error reconciling messages:', error);
       }
     }, 500);
-  }, [loadSessionMessages, wsMessages.length]);
+  }, [deduplicateMessages, loadSessionMessages, wsMessages.length]);
 
   const convertedMessages = useMemo(() => {
     if (sessionProvider === 'cursor') {
@@ -296,14 +319,18 @@ export function useChatSessionState({
           height: previousScrollHeight,
           top: previousScrollTop,
         };
-        setSessionMessages((previous) => [...moreMessages, ...previous]);
+        // Deduplicate history messages by offset before prepending
+        setSessionMessages((previous) => {
+          const deduplicated = deduplicateMessages(previous, moreMessages);
+          return deduplicated.length > 0 ? [...deduplicated, ...previous] : previous;
+        });
         setVisibleMessageCount((previousCount) => previousCount + moreMessages.length);
         return true;
       } finally {
         isLoadingMoreRef.current = false;
       }
     },
-    [isLoadingMoreMessages, loadSessionMessages],
+    [deduplicateMessages, isLoadingMoreMessages, loadSessionMessages],
   );
 
   const handleScroll = useCallback(async () => {
@@ -527,7 +554,11 @@ export function useChatSessionState({
         );
 
         if (newMessages.length > 0) {
-          setSessionMessages((previous) => [...previous, ...newMessages]);
+          // Deduplicate external messages by offset before appending
+          setSessionMessages((previous) => {
+            const deduplicated = deduplicateMessages(previous, newMessages);
+            return deduplicated.length > 0 ? [...previous, ...deduplicated] : previous;
+          });
 
           const shouldAutoScroll = Boolean(autoScrollToBottom) && isNearBottom();
           if (shouldAutoScroll) {
@@ -542,6 +573,7 @@ export function useChatSessionState({
     reloadExternalMessages();
   }, [
     autoScrollToBottom,
+    deduplicateMessages,
     externalMessageUpdate,
     isNearBottom,
     loadSessionMessages,
