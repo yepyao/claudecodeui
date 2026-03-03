@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { decodeHtmlEntities, formatUsageLimitText } from '../utils/chatFormatting';
 import { safeLocalStorage } from '../utils/chatStorage';
 import type { ChatMessage, PendingPermissionRequest } from '../types/types';
 import type { Project, ProjectSession, SessionProvider } from '../../../types/app';
+import { useWebSocketHandler } from '../../../contexts/WebSocketContext';
 
 type PendingViewSession = {
   sessionId: string | null;
@@ -117,18 +118,53 @@ export function useChatRealtimeHandlers({
   setWsMessages,
   onReconcileMessages,
 }: UseChatRealtimeHandlersArgs) {
-  const lastProcessedMessageRef = useRef<LatestChatMessage | null>(null);
+  // Refs for thinking message buffering (to batch rapid thinking chunks)
+  const thinkingBufferRef = useRef<string>('');
+  const thinkingTimerRef = useRef<number | null>(null);
+  const thinkingMessageIndexRef = useRef<number | null>(null);
 
-  useEffect(() => {
+  // Flush thinking buffer to React state
+  const flushThinkingBuffer = useCallback(() => {
+    if (!thinkingBufferRef.current || !setWsMessages) return;
+    
+    const bufferedText = thinkingBufferRef.current;
+    thinkingBufferRef.current = '';
+    thinkingTimerRef.current = null;
+    
+    setWsMessages((previous) => {
+      const updated = [...previous];
+      const idx = thinkingMessageIndexRef.current;
+      
+      if (idx !== null && idx < updated.length) {
+        const existing = updated[idx];
+        if (existing && existing.isThinking) {
+          updated[idx] = {
+            ...existing,
+            content: (existing.content || '') + bufferedText,
+            isStreaming: true,
+          };
+          return updated;
+        }
+      }
+      
+      // No existing thinking message, create new one
+      updated.push({
+        type: 'assistant',
+        content: bufferedText,
+        timestamp: new Date(),
+        isThinking: true,
+        isStreaming: true,
+      });
+      thinkingMessageIndexRef.current = updated.length - 1;
+      return updated;
+    });
+  }, [setWsMessages]);
+
+  // Process WebSocket message synchronously - called for EVERY message, no loss!
+  const processMessage = useCallback((latestMessage: LatestChatMessage) => {
     if (!latestMessage) {
       return;
     }
-
-    // Guard against duplicate processing when dependency updates occur without a new message object.
-    if (lastProcessedMessageRef.current === latestMessage) {
-      return;
-    }
-    lastProcessedMessageRef.current = latestMessage;
 
     const messageData = latestMessage.data?.message || latestMessage.data;
     const structuredMessageData =
@@ -593,31 +629,13 @@ export function useChatRealtimeHandlers({
 
       case 'cursor-thinking':
         if (latestMessage.data?.text) {
-          const thinkingText = latestMessage.data.text;
-          let addedNewMessage = false;
-          setWsMessages!((previous) => {
-            const updated = [...previous];
-            const lastIndex = updated.length - 1;
-            const last = updated[lastIndex];
-            if (last && last.type === 'assistant' && last.isThinking && !last.isToolUse) {
-              updated[lastIndex] = {
-                ...last,
-                content: (last.content || '') + thinkingText,
-                isStreaming: true,
-              };
-            } else {
-              updated.push({
-                type: 'assistant',
-                content: thinkingText,
-                timestamp: new Date(),
-                isThinking: true,
-                isStreaming: true,
-              });
-              addedNewMessage = true;
-            }
-            return updated;
-          });
-          if (addedNewMessage) {
+          // Buffer thinking text and debounce flush to avoid React state batching issues
+          thinkingBufferRef.current += latestMessage.data.text;
+          
+          if (!thinkingTimerRef.current) {
+            thinkingTimerRef.current = window.setTimeout(() => {
+              flushThinkingBuffer();
+            }, 100);
           }
         }
         break;
@@ -649,6 +667,16 @@ export function useChatRealtimeHandlers({
         break;
 
       case 'cursor-result': {
+        // Flush any pending thinking buffer first
+        if (thinkingTimerRef.current) {
+          clearTimeout(thinkingTimerRef.current);
+          thinkingTimerRef.current = null;
+        }
+        if (thinkingBufferRef.current) {
+          flushThinkingBuffer();
+        }
+        thinkingMessageIndexRef.current = null;
+        
         // Finalize any streaming thinking message
         finalizeStreamingMessage(setWsMessages!);
 
@@ -1131,7 +1159,6 @@ export function useChatRealtimeHandlers({
         break;
     }
   }, [
-    latestMessage,
     provider,
     selectedProject,
     selectedSession,
@@ -1150,5 +1177,18 @@ export function useChatRealtimeHandlers({
     onNavigateToSession,
     setWsMessages,
     onReconcileMessages,
+    flushThinkingBuffer,
   ]);
+
+  // Use direct WebSocket subscription - processes EVERY message synchronously!
+  useWebSocketHandler(processMessage, [processMessage]);
+
+  // Cleanup thinking timer on unmount
+  useEffect(() => {
+    return () => {
+      if (thinkingTimerRef.current) {
+        clearTimeout(thinkingTimerRef.current);
+      }
+    };
+  }, []);
 }

@@ -2,9 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAuth } from './AuthContext';
 import { IS_PLATFORM } from '../constants/config';
 
+type MessageHandler = (message: any) => void;
+
 type WebSocketContextType = {
   ws: WebSocket | null;
   sendMessage: (message: any) => void;
+  subscribe: (handler: MessageHandler) => () => void;
   latestMessage: any | null;
   isConnected: boolean;
 };
@@ -19,6 +22,30 @@ export const useWebSocket = () => {
   return context;
 };
 
+export const useWebSocketHandler = (
+  handler: MessageHandler,
+  deps: React.DependencyList = [],
+) => {
+  const { subscribe } = useWebSocket();
+  const handlerRef = useRef(handler);
+  
+  // Keep handler ref updated
+  useEffect(() => {
+    handlerRef.current = handler;
+  }, [handler]);
+  
+  useEffect(() => {
+    // Wrap to always use latest handler
+    const wrappedHandler = (message: any) => {
+      handlerRef.current(message);
+    };
+    
+    const unsubscribe = subscribe(wrappedHandler);
+    return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subscribe, ...deps]);
+};
+
 const buildWebSocketUrl = (token: string | null) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   if (IS_PLATFORM) return `${protocol}//${window.location.host}/ws`; // Platform mode: Use same domain as the page (goes through proxy)
@@ -29,10 +56,18 @@ const buildWebSocketUrl = (token: string | null) => {
 const useWebSocketProviderState = (): WebSocketContextType => {
   const wsRef = useRef<WebSocket | null>(null);
   const unmountedRef = useRef(false); // Track if component is unmounted
+  const handlersRef = useRef<Set<MessageHandler>>(new Set());
   const [latestMessage, setLatestMessage] = useState<any>(null);
   const [isConnected, setIsConnected] = useState(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { token } = useAuth();
+
+  const subscribe = useCallback((handler: MessageHandler) => {
+    handlersRef.current.add(handler);
+    return () => {
+      handlersRef.current.delete(handler);
+    };
+  }, []);
 
   useEffect(() => {
     connect();
@@ -67,6 +102,17 @@ const useWebSocketProviderState = (): WebSocketContextType => {
         try {
           const data = JSON.parse(event.data);
           console.log('[WS ←]', data.type ?? 'unknown', data);
+          
+          // Call all registered handlers SYNCHRONOUSLY - no message loss!
+          handlersRef.current.forEach((handler) => {
+            try {
+              handler(data);
+            } catch (handlerError) {
+              console.error('WebSocket handler error:', handlerError);
+            }
+          });
+          
+          // Also update state for backward compatibility
           setLatestMessage(data);
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
@@ -107,9 +153,10 @@ const useWebSocketProviderState = (): WebSocketContextType => {
   ({
     ws: wsRef.current,
     sendMessage,
+    subscribe,
     latestMessage,
     isConnected
-  }), [sendMessage, latestMessage, isConnected]);
+  }), [sendMessage, subscribe, latestMessage, isConnected]);
 
   return value;
 };
