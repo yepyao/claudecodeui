@@ -218,6 +218,9 @@ export function useChatSessionState({
       if (!container || isLoadingMoreRef.current || isLoadingMoreMessages) {
         return false;
       }
+      if (isLoadingSessionRef.current) {
+        return false;
+      }
       if (allMessagesLoadedRef.current) return false;
       const session = selectedSessionRef.current;
       const project = selectedProjectRef.current;
