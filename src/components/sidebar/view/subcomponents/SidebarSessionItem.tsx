@@ -55,7 +55,7 @@ export default function SidebarSessionItem({
 }: SidebarSessionItemProps) {
   const sessionView = createSessionViewModel(session, currentTime, t);
   const isSelected = selectedSession?.id === session.id;
-  const showUnread = sessionView.hasUnread && !isSelected;
+  const showUnread = sessionView.hasUnread;
 
   const selectMobileSession = () => {
     onProjectSelect(project);
@@ -87,9 +87,7 @@ export default function SidebarSessionItem({
           className={cn(
             'p-2 mx-3 my-0.5 rounded-md bg-card border active:scale-[0.98] transition-all duration-150 relative',
             isSelected ? 'bg-primary/5 border-primary/20' : '',
-            !isSelected && showUnread
-              ? 'border-blue-500/30 bg-blue-50/5 dark:bg-blue-900/5'
-              : 'border-border/30',
+            showUnread ? 'border-blue-500/30 bg-blue-50/5 dark:bg-blue-900/5' : 'border-border/30',
           )}
           onClick={selectMobileSession}
         >
