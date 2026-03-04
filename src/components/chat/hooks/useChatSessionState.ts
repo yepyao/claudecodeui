@@ -105,6 +105,7 @@ export function useChatSessionState({
   const offsetBeginRef = useRef(-1);
   const offsetEndRef = useRef(-1);
   const scrollPositionRef = useRef({ height: 0, top: 0 });
+  const preLoadScrollHeightRef = useRef<number>(0);
   const loadAllFinishedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadAllOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -300,8 +301,7 @@ export function useChatSessionState({
       const provider = session.__provider || 'claude';
 
       isLoadingMoreRef.current = true;
-      const previousScrollHeight = container.scrollHeight;
-      const previousScrollTop = container.scrollTop;
+      preLoadScrollHeightRef.current = container.scrollHeight;
 
       try {
         const moreMessages = await loadSessionMessages(
@@ -315,9 +315,12 @@ export function useChatSessionState({
           return false;
         }
 
+        // Capture current scroll state after the await — at this point the loading
+        // indicator has appeared (and our useLayoutEffect has adjusted scrollTop to
+        // compensate), so these values reflect the true "anchor" for restoration.
         pendingScrollRestoreRef.current = {
-          height: previousScrollHeight,
-          top: previousScrollTop,
+          height: container.scrollHeight,
+          top: container.scrollTop,
         };
         // Deduplicate history messages by offset before prepending
         setSessionMessages((previous) => {
@@ -371,6 +374,19 @@ export function useChatSessionState({
       }
     }
   }, [isNearBottom, loadOlderMessages, onMarkSessionAsRead, selectedProject?.name, selectedSession?.id, selectedSession?.__provider, selectedSession?.lastBlobOffset]);
+
+  // When the loading indicator appears it adds height above the content, causing
+  // a visual jump upward. Compensate immediately so the viewport stays pinned.
+  useLayoutEffect(() => {
+    if (!isLoadingMoreMessages || !scrollContainerRef.current) {
+      return;
+    }
+    const container = scrollContainerRef.current;
+    const indicatorHeight = container.scrollHeight - preLoadScrollHeightRef.current;
+    if (indicatorHeight > 0) {
+      container.scrollTop += indicatorHeight;
+    }
+  }, [isLoadingMoreMessages]);
 
   useLayoutEffect(() => {
     if (!pendingScrollRestoreRef.current || !scrollContainerRef.current) {
