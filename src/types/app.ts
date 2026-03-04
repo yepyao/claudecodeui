@@ -13,6 +13,7 @@ export interface ProjectSession {
   lastActivity?: string;
   messageCount?: number;
   lastBlobOffset?: number;
+  displayName?: string | null;
   starred?: boolean;
   readAt?: string | null;
   readBlobOffset?: number | null;

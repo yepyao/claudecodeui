@@ -741,6 +741,26 @@ export function useProjectsState({
     [navigate, selectedProject?.name],
   );
 
+  const updateSessionDisplayName = useCallback(
+    (projectName: string, sessionId: string, displayName: string | null) => {
+      setProjects((prevProjects) =>
+        prevProjects.map((project) => {
+          if (project.name !== projectName) return project;
+          const patch = (sessions: ProjectSession[] | undefined) =>
+            sessions?.map((s) => s.id === sessionId ? { ...s, displayName } : s);
+          return {
+            ...project,
+            sessions: patch(project.sessions),
+            cursorSessions: patch(project.cursorSessions),
+            codexSessions: patch(project.codexSessions),
+            geminiSessions: patch(project.geminiSessions),
+          };
+        }),
+      );
+    },
+    [],
+  );
+
   const appendProjectSessions = useCallback(
     (projectName: string, provider: SessionProvider, newSessions: ProjectSession[], hasMore: boolean) => {
       setProjects((prev) =>
@@ -787,9 +807,11 @@ export function useProjectsState({
       onCloseSettings: () => setShowSettings(false),
       isMobile,
       onAppendSessions: appendProjectSessions,
+      onUpdateSessionDisplayName: updateSessionDisplayName,
     }),
     [
       appendProjectSessions,
+      updateSessionDisplayName,
       handleNewSession,
       handleProjectDelete,
       handleProjectSelect,

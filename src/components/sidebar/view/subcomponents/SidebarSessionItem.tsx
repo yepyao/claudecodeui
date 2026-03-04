@@ -178,7 +178,7 @@ export default function SidebarSessionItem({
           'absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center gap-1 transition-all duration-200',
           isStarred ? '' : 'opacity-0 group-hover:opacity-100',
         )}>
-          {editingSession === session.id && !sessionView.isCodexSession && !sessionView.isCursorSession ? (
+          {editingSession === session.id ? (
             <>
               <input
                 type="text"
@@ -241,18 +241,16 @@ export default function SidebarSessionItem({
                   )}
                 />
               </button>
-              {!sessionView.isCursorSession && !sessionView.isCodexSession && (
-                <button
-                  className="w-6 h-6 hover:bg-accent rounded flex items-center justify-center"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onStartEditingSession(session.id, session.summary || t('projects.newSession'));
-                  }}
-                  title={t('tooltips.editSessionName')}
-                >
-                  <Edit2 className="w-3 h-3 text-muted-foreground" />
-                </button>
-              )}
+              <button
+                className="w-6 h-6 hover:bg-accent rounded flex items-center justify-center"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onStartEditingSession(session.id, (session.displayName as string) || (session.summary as string) || (session.name as string) || t('projects.newSession'));
+                }}
+                title={t('tooltips.editSessionName')}
+              >
+                <Edit2 className="w-3 h-3 text-muted-foreground" />
+              </button>
               {!sessionView.isCursorSession && (
                 <button
                   className="w-6 h-6 hover:bg-red-50 dark:hover:bg-red-900/20 rounded flex items-center justify-center"

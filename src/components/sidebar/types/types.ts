@@ -39,6 +39,7 @@ export type SidebarProps = {
   onCloseSettings: () => void;
   isMobile: boolean;
   onAppendSessions: (projectName: string, provider: SessionProvider, sessions: ProjectSession[], hasMore: boolean) => void;
+  onUpdateSessionDisplayName: (projectName: string, sessionId: string, displayName: string | null) => void;
 };
 
 export type SessionViewModel = {

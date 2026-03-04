@@ -33,6 +33,7 @@ type UseSidebarControllerArgs = {
   setSidebarVisible: (visible: boolean) => void;
   sidebarVisible: boolean;
   onAppendSessions: (projectName: string, provider: SessionProvider, sessions: ProjectSession[], hasMore: boolean) => void;
+  onUpdateSessionDisplayName: (projectName: string, sessionId: string, displayName: string | null) => void;
 };
 
 export function useSidebarController({
@@ -51,6 +52,7 @@ export function useSidebarController({
   setSidebarVisible,
   sidebarVisible,
   onAppendSessions,
+  onUpdateSessionDisplayName,
 }: UseSidebarControllerArgs) {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [editingProject, setEditingProject] = useState<string | null>(null);
@@ -468,12 +470,23 @@ export function useSidebarController({
   }, [onRefresh]);
 
   const updateSessionSummary = useCallback(
-    async (_projectName: string, _sessionId: string, _summary: string) => {
-      // Session rename endpoint is not currently exposed on the API.
-      setEditingSession(null);
-      setEditingSessionName('');
+    async (projectName: string, sessionId: string, displayName: string) => {
+      try {
+        const trimmed = displayName.trim() || null;
+        const response = await api.renameSession(projectName, sessionId, trimmed);
+        if (response.ok) {
+          onUpdateSessionDisplayName(projectName, sessionId, trimmed);
+        } else {
+          console.error('Failed to rename session');
+        }
+      } catch (error) {
+        console.error('Error renaming session:', error);
+      } finally {
+        setEditingSession(null);
+        setEditingSessionName('');
+      }
     },
-    [],
+    [onUpdateSessionDisplayName],
   );
 
   const collapseSidebar = useCallback(() => {

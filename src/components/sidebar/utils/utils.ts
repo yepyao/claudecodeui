@@ -34,19 +34,22 @@ export const getSessionDate = (session: SessionWithProvider): Date => {
 };
 
 export const getSessionName = (session: SessionWithProvider, t: TFunction): string => {
+  // User-set override takes precedence for all providers
+  if (session.displayName) return session.displayName as string;
+
   if (session.__provider === 'cursor') {
-    return session.name || t('projects.untitledSession');
+    return (session.name as string) || t('projects.untitledSession');
   }
 
   if (session.__provider === 'codex') {
-    return session.summary || session.name || t('projects.codexSession');
+    return (session.summary as string) || (session.name as string) || t('projects.codexSession');
   }
 
   if (session.__provider === 'gemini') {
-    return session.summary || session.name || t('projects.newSession');
+    return (session.summary as string) || (session.name as string) || t('projects.newSession');
   }
 
-  return session.summary || t('projects.newSession');
+  return (session.summary as string) || t('projects.newSession');
 };
 
 export const getSessionTime = (session: SessionWithProvider): string => {

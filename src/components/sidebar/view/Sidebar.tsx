@@ -36,6 +36,7 @@ function Sidebar({
   onCloseSettings,
   isMobile,
   onAppendSessions,
+  onUpdateSessionDisplayName,
 }: SidebarProps) {
   const { t } = useTranslation(['sidebar', 'common']);
   const { isPWA } = useDeviceSettings({ trackMobile: false });
@@ -111,6 +112,7 @@ function Sidebar({
     setSidebarVisible: (visible) => setPreference('sidebarVisible', visible),
     sidebarVisible,
     onAppendSessions,
+    onUpdateSessionDisplayName,
   });
 
   useEffect(() => {

@@ -45,7 +45,7 @@ import fetch from 'node-fetch';
 import mime from 'mime-types';
 
 import { getProjects, getClaudeSessions, getCursorSessions, getSessionMessages, renameProject, toggleStarProject, toggleStarSession, markSessionRead, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, extractCursorProjectPath, clearProjectDirectoryCache, getClaudeSessionById, getCursorSessionById, getCodexSessionById, getGeminiSessionById, encodeCursorProjectName } from './projects.js';
-import { needsMigration, migrateSessionConfigs } from './session-config.js';
+import { needsMigration, migrateSessionConfigs, updateSessionConfig } from './session-config.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval } from './claude-sdk.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive, getActiveCodexSessions } from './openai-codex.js';
@@ -824,6 +824,18 @@ app.put('/api/projects/:projectName/sessions/:sessionId/read', authenticateToken
     try {
         const result = await markSessionRead(req.params.projectName, req.params.sessionId, req.body?.readAt, req.body?.readBlobOffset);
         res.json({ success: true, ...result });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Rename session (override display name)
+app.put('/api/projects/:projectName/sessions/:sessionId/rename', authenticateToken, async (req, res) => {
+    try {
+        const { displayName } = req.body;
+        const trimmed = displayName?.trim() || null;
+        await updateSessionConfig(req.params.projectName, req.params.sessionId, { displayName: trimmed });
+        res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

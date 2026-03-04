@@ -11,7 +11,8 @@
  *   {
  *     "starred": boolean,
  *     "readAt": string | null,        // ISO timestamp for Claude/Codex/Gemini
- *     "readBlobOffset": number | null // For Cursor sessions
+ *     "readBlobOffset": number | null, // For Cursor sessions
+ *     "displayName": string | null    // User-set override name (all providers)
  *   }
  */
 
@@ -31,7 +32,7 @@ export async function getSessionConfig(projectName, sessionId) {
     return JSON.parse(content);
   } catch (err) {
     if (err.code === 'ENOENT') {
-      return { starred: false, readAt: null, readBlobOffset: null };
+      return { starred: false, readAt: null, readBlobOffset: null, displayName: null };
     }
     throw err;
   }

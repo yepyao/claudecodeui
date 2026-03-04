@@ -437,6 +437,7 @@ async function getProjects(progressCallback = null) {
         ...session,
         starred: configs[session.id]?.starred || false,
         readAt: configs[session.id]?.readAt || null,
+        displayName: configs[session.id]?.displayName || null,
       }));
     } catch (e) {
       console.warn(`Could not load Gemini sessions for ${project.displayName}:`, e.message);
@@ -862,6 +863,7 @@ async function getClaudeSessions(projectName, limit = 5, offset = 0, starredSess
       ...session,
       starred: configs[session.id]?.starred || false,
       readAt: configs[session.id]?.readAt || null,
+      displayName: configs[session.id]?.displayName || null,
     }));
 
     // Sort: starred sessions first, then by lastActivity
@@ -1582,6 +1584,7 @@ async function getCursorSessions(projectPath, limit = 5, offset = 0, starredSess
       ...session,
       starred: configs[session.id]?.starred || false,
       readBlobOffset: configs[session.id]?.readBlobOffset ?? null,
+      displayName: configs[session.id]?.displayName || null,
     }));
 
     // Sort: starred sessions first, then by createdAt
@@ -1606,6 +1609,7 @@ async function getCursorSessions(projectPath, limit = 5, offset = 0, starredSess
         lastBlobOffset: session.lastBlobOffset,
         starred: session.starred,
         readBlobOffset: session.readBlobOffset,
+        displayName: session.displayName,
         provider: 'cursor-agent'
       });
     }
@@ -1736,6 +1740,7 @@ async function getCodexSessions(projectPath, options = {}) {
       ...session,
       starred: configs[session.id]?.starred || false,
       readAt: configs[session.id]?.readAt || null,
+      displayName: configs[session.id]?.displayName || null,
     }));
 
     // Return limited sessions for performance (0 = unlimited for deletion)
@@ -2137,6 +2142,7 @@ async function getCursorSessionById(projectPath, sessionId) {
       lastBlobOffset: blobCount?.count || 0,
       starred: config.starred || false,
       readBlobOffset: config.readBlobOffset ?? null,
+      displayName: config.displayName || null,
       provider: 'cursor-agent'
     };
   } catch (error) {
@@ -2166,6 +2172,7 @@ async function getCodexSessionById(projectPath, sessionId) {
           model: sessionData.model,
           starred: config.starred || false,
           readAt: config.readAt || null,
+          displayName: config.displayName || null,
           provider: 'codex'
         };
       }
@@ -2198,6 +2205,7 @@ async function getGeminiSessionById(projectPath, sessionId) {
       lastActivity: session.lastActivity?.toISOString() || new Date().toISOString(),
       starred: config.starred || false,
       readAt: config.readAt || null,
+      displayName: config.displayName || null,
       provider: 'gemini'
     };
   } catch (error) {
