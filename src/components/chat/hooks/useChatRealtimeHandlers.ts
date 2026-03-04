@@ -134,20 +134,25 @@ export function useChatRealtimeHandlers({
     setWsMessages((previous) => {
       const updated = [...previous];
       const idx = thinkingMessageIndexRef.current;
-      
+
       if (idx !== null && idx < updated.length) {
         const existing = updated[idx];
         if (existing && existing.isThinking) {
-          updated[idx] = {
-            ...existing,
-            content: (existing.content || '') + bufferedText,
-            isStreaming: true,
-          };
-          return updated;
+          if (idx === updated.length - 1) {
+            // Still the last message — append to existing thinking stream
+            updated[idx] = {
+              ...existing,
+              content: (existing.content || '') + bufferedText,
+              isStreaming: true,
+            };
+            return updated;
+          }
+          // New messages were appended after this thinking block — finalize it
+          updated[idx] = { ...existing, isStreaming: false };
         }
       }
-      
-      // No existing thinking message, create new one
+
+      // No existing thinking message (or previous one was finalized), create new one
       updated.push({
         type: 'assistant',
         content: bufferedText,

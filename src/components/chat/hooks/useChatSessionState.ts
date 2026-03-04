@@ -651,6 +651,14 @@ export function useChatSessionState({
     return chatMessages.slice(-visibleMessageCount);
   }, [chatMessages, visibleMessageCount]);
 
+  const lastStreamingContentLength = useMemo(() => {
+    const lastMsg = chatMessages[chatMessages.length - 1];
+    if (lastMsg?.isStreaming) {
+      return lastMsg.content?.length ?? 0;
+    }
+    return 0;
+  }, [chatMessages]);
+
   useEffect(() => {
     if (!autoScrollToBottom && scrollContainerRef.current) {
       const container = scrollContainerRef.current;
@@ -686,7 +694,7 @@ export function useChatSessionState({
     if (heightDiff > 0 && prevTop > 0) {
       container.scrollTop = prevTop + heightDiff;
     }
-  }, [autoScrollToBottom, chatMessages.length, isLoadingMoreMessages, isUserScrolledUp, scrollToBottom]);
+  }, [autoScrollToBottom, chatMessages.length, lastStreamingContentLength, isLoadingMoreMessages, isUserScrolledUp, scrollToBottom]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
