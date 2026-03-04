@@ -189,6 +189,14 @@ async function spawnCursor(command, options = {}, ws) {
               });
               break;
               
+            case 'tool_call':
+              ws.send({
+                type: 'cursor-tool-call',
+                data: response,
+                sessionId: capturedSessionId || sessionId || null
+              });
+              break;
+
             default:
               // Forward any other message types
               ws.send({

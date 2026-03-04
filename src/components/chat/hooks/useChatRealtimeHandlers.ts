@@ -655,6 +655,77 @@ export function useChatRealtimeHandlers({
         ]);
         break;
 
+      case 'cursor-tool-call': {
+        const toolData = latestMessage.data;
+        const subtype = toolData?.subtype; // "started" | "completed"
+        const toolId = toolData?.call_id || `tool_${Date.now()}`;
+
+        // tool_call shape: { "globToolCall": { args: {...}, result?: {...} } }
+        const toolCallObj = toolData?.tool_call || {};
+        const toolCallKey = Object.keys(toolCallObj)[0] || '';
+        // Strip "ToolCall" suffix and capitalise: "globToolCall" → "Glob"
+        const toolNameRaw = toolCallKey.replace(/ToolCall$/, '');
+        const toolName = toolNameRaw
+          ? toolNameRaw.charAt(0).toUpperCase() + toolNameRaw.slice(1)
+          : 'Unknown Tool';
+        const rawInput = toolCallObj[toolCallKey]?.args ?? {};
+        // Map cursor-specific arg field names to what ToolConfig renderers expect
+        const normalizedInput =
+          toolName === 'Glob'
+            ? { pattern: rawInput.globPattern ?? rawInput.pattern ?? '', path: rawInput.targetDirectory ?? rawInput.path ?? '' }
+            : rawInput;
+        const toolInput =
+          typeof normalizedInput === 'string' ? normalizedInput : JSON.stringify(normalizedInput, null, 2);
+
+        if (subtype === 'completed') {
+          // Find the existing "started" message and attach the result
+          const rawResult = toolCallObj[toolCallKey]?.result;
+          const resultContent =
+            rawResult !== undefined
+              ? typeof rawResult === 'string'
+                ? rawResult
+                : JSON.stringify(rawResult, null, 2)
+              : '';
+
+          // Extract structured toolUseResult so ToolConfig renderers can read typed data
+          let toolUseResult: Record<string, unknown> | undefined;
+          if (toolName === 'Glob' && rawResult?.success) {
+            toolUseResult = {
+              filenames: rawResult.success.files ?? [],
+              numFiles: rawResult.success.totalFiles ?? rawResult.success.files?.length ?? 0,
+            };
+          }
+
+          setWsMessages!((previous) =>
+            previous.map((message) => {
+              if (message.isToolUse && message.toolId === toolId) {
+                return {
+                  ...message,
+                  toolResult: { content: resultContent, isError: false, timestamp: new Date(), toolUseResult },
+                };
+              }
+              return message;
+            }),
+          );
+        } else {
+          // "started" — create the message
+          setWsMessages!((previous) => [
+            ...previous,
+            {
+              type: 'assistant',
+              content: '',
+              timestamp: new Date(),
+              isToolUse: true,
+              toolName,
+              toolInput,
+              toolId,
+              toolResult: null,
+            },
+          ]);
+        }
+        break;
+      }
+
       case 'cursor-error':
         setWsMessages!((previous) => [
           ...previous,
@@ -743,30 +814,7 @@ export function useChatRealtimeHandlers({
       }
 
       case 'cursor-output':
-        // Finalize any streaming thinking message before regular output
-        finalizeStreamingMessage(setWsMessages!);
-
-        try {
-          const raw = String(latestMessage.data ?? '');
-          const cleaned = raw
-            .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
-            .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
-            .trim();
-
-          if (cleaned) {
-            streamBufferRef.current += streamBufferRef.current ? `\n${cleaned}` : cleaned;
-            if (!streamTimerRef.current) {
-              streamTimerRef.current = window.setTimeout(() => {
-                const chunk = streamBufferRef.current;
-                streamBufferRef.current = '';
-                streamTimerRef.current = null;
-                appendStreamingChunk(setWsMessages!, chunk, true);
-              }, 100);
-            }
-          }
-        } catch (error) {
-          console.warn('Error handling cursor-output message:', error);
-        }
+        // Suppressed — raw cursor output not displayed in chat
         break;
 
       case 'claude-complete': {

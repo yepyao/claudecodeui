@@ -150,11 +150,24 @@ export const convertCursorSessionMessages = (blobs: CursorBlob[], projectPath: s
             const toolCallId = item.toolCallId || content.id;
             const result = item.result || '';
 
-            if (toolCallId && toolUseMap[toolCallId]) {
-              toolUseMap[toolCallId].toolResult = {
-                content: result,
-                isError: false,
+            // providerOptions sits on the outer content object, not on the item itself
+            const highLevel = (item.providerOptions ?? content.providerOptions)?.cursor?.highLevelToolCallResult;
+            let toolUseResult: Record<string, unknown> | undefined;
+            if (toolName === 'Glob' && highLevel?.output?.success) {
+              const s = highLevel.output.success;
+              toolUseResult = {
+                filenames: s.files ?? [],
+                numFiles: s.totalFiles ?? s.files?.length ?? 0,
               };
+            }
+            const toolResult = {
+              content: result,
+              isError: highLevel?.isError ?? false,
+              ...(toolUseResult ? { toolUseResult } : {}),
+            };
+
+            if (toolCallId && toolUseMap[toolCallId]) {
+              toolUseMap[toolCallId].toolResult = toolResult;
             } else {
               converted.push({
                 type: 'assistant',
@@ -167,10 +180,7 @@ export const convertCursorSessionMessages = (blobs: CursorBlob[], projectPath: s
                 toolName,
                 toolId: toolCallId,
                 toolInput: normalizeToolInput(null),
-                toolResult: {
-                  content: result,
-                  isError: false,
-                },
+                toolResult,
               });
             }
           }
@@ -193,7 +203,10 @@ export const convertCursorSessionMessages = (blobs: CursorBlob[], projectPath: s
               continue;
             }
 
-            if (part?.type === 'tool-call' || part?.type === 'tool_use') {
+            // Cursor DB stores calls as type "tool_call" (underscore) with nested tool_call object;
+            // classic formats use "tool-call" (hyphen) or "tool_use".
+            const isCursorToolCall = part?.type === 'tool_call' && part?.tool_call;
+            if (part?.type === 'tool-call' || part?.type === 'tool_use' || isCursorToolCall) {
               if (textParts.length > 0 || reasoningText) {
                 converted.push({
                   type: role,
@@ -208,10 +221,32 @@ export const convertCursorSessionMessages = (blobs: CursorBlob[], projectPath: s
                 reasoningText = null;
               }
 
-              const toolNameRaw = part.toolName || part.name || 'Unknown Tool';
+              let toolNameRaw: string;
+              let toolId: string;
+              let toolInput: any;
+
+              if (isCursorToolCall) {
+                // Cursor format: { type: "tool_call", call_id: "...", tool_call: { globToolCall: { args: {...} } } }
+                const toolCallKey = Object.keys(part.tool_call)[0] || '';
+                const raw = toolCallKey.replace(/ToolCall$/, '');
+                toolNameRaw = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : 'Unknown Tool';
+                toolId = part.call_id || `tool_${blobIdx}`;
+                toolInput = part.tool_call[toolCallKey]?.args ?? {};
+              } else {
+                toolNameRaw = part.toolName || part.name || 'Unknown Tool';
+                toolId = part.toolCallId || part.id || `tool_${blobIdx}`;
+                toolInput = part.args || part.input;
+              }
+
               const toolName = toolNameRaw === 'ApplyPatch' ? 'Edit' : toolNameRaw;
-              const toolId = part.toolCallId || part.id || `tool_${blobIdx}`;
-              let toolInput = part.args || part.input;
+
+              // Normalize cursor-specific arg field names to what ToolConfig renderers expect
+              if (toolName === 'Glob' && toolInput && typeof toolInput === 'object') {
+                toolInput = {
+                  pattern: (toolInput as any).globPattern ?? (toolInput as any).pattern ?? '',
+                  path: (toolInput as any).targetDirectory ?? (toolInput as any).path ?? '',
+                };
+              }
 
               if (toolName === 'Edit' && part.args) {
                 if (part.args.patch) {
