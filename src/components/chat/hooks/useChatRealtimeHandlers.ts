@@ -5,6 +5,7 @@ import { safeLocalStorage } from '../utils/chatStorage';
 import type { ChatMessage, PendingPermissionRequest } from '../types/types';
 import type { Project, ProjectSession, SessionProvider } from '../../../types/app';
 import { useWebSocketHandler } from '../../../contexts/WebSocketContext';
+import { useCompletionSound } from './useCompletionSound';
 
 type PendingViewSession = {
   sessionId: string | null;
@@ -118,6 +119,8 @@ export function useChatRealtimeHandlers({
   setWsMessages,
   onReconcileMessages,
 }: UseChatRealtimeHandlersArgs) {
+  const playCompletionSound = useCompletionSound();
+
   // Refs for thinking message buffering (to batch rapid thinking chunks)
   const thinkingBufferRef = useRef<string>('');
   const thinkingTimerRef = useRef<number | null>(null);
@@ -823,6 +826,7 @@ export function useChatRealtimeHandlers({
         break;
 
       case 'claude-complete': {
+        playCompletionSound();
         const pendingSessionId = sessionStorage.getItem('pendingSessionId');
         const completedSessionId =
           latestMessage.sessionId || currentSessionId || pendingSessionId;
@@ -963,6 +967,7 @@ export function useChatRealtimeHandlers({
         }
 
         if (codexData.type === 'turn_complete') {
+          playCompletionSound();
           clearLoadingIndicators();
           markSessionsAsCompleted(latestMessage.sessionId, currentSessionId, selectedSession?.id);
         }
@@ -983,6 +988,7 @@ export function useChatRealtimeHandlers({
       }
 
       case 'codex-complete': {
+        playCompletionSound();
         const codexPendingSessionId = sessionStorage.getItem('pendingSessionId');
         const codexActualSessionId = latestMessage.actualSessionId || codexPendingSessionId;
         const codexCompletedSessionId =
